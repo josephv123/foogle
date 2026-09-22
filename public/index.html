@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foogle</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    color: #202124;
+  }
+  .topbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 18px;
+    padding: 16px 20px;
+    font-size: 13px;
+  }
+  .topbar a { color: #202124; text-decoration: none; }
+  .topbar a:hover { text-decoration: underline; }
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: #1a73e8;
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+    cursor: default;
+  }
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding-bottom: 12vh;
+  }
+  .logo {
+    font-size: 88px;
+    font-weight: 500;
+    letter-spacing: -4px;
+    user-select: none;
+    margin-bottom: 28px;
+  }
+  .logo .b1 { color: #4285f4; }
+  .logo .r  { color: #ea4335; }
+  .logo .y  { color: #fbbc05; }
+  .logo .g  { color: #34a853; }
+  form { width: 100%; max-width: 584px; padding: 0 20px; text-align: center; }
+  .searchbox {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 46px;
+    border: 1px solid #dfe1e5;
+    border-radius: 24px;
+    padding: 0 16px;
+    background: #fff;
+  }
+  .searchbox:hover, .searchbox:focus-within {
+    box-shadow: 0 1px 6px rgba(32,33,36,.28);
+    border-color: rgba(223,225,229,0);
+  }
+  .searchbox svg { flex-shrink: 0; }
+  .searchbox input {
+    flex: 1;
+    border: none;
+    outline: none;
+    font-size: 16px;
+    margin-left: 12px;
+    background: transparent;
+  }
+  .buttons { margin-top: 28px; }
+  .buttons button {
+    background: #f8f9fa;
+    border: 1px solid #f8f9fa;
+    border-radius: 4px;
+    color: #3c4043;
+    font-family: arial, sans-serif;
+    font-size: 14px;
+    padding: 0 16px;
+    height: 36px;
+    margin: 0 4px;
+    cursor: pointer;
+  }
+  .buttons button:hover {
+    border: 1px solid #dadce0;
+    box-shadow: 0 1px 1px rgba(0,0,0,.1);
+    color: #202124;
+  }
+  .tagline { margin-top: 26px; font-size: 13px; color: #70757a; }
+  footer { background: #f2f2f2; font-size: 14px; color: #70757a; }
+  footer .row {
+    padding: 14px 28px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer .row + .row { border-top: 1px solid #dadce0; }
+  footer a { color: #70757a; text-decoration: none; margin-right: 24px; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="/search?q=fmail">Fmail</a>
+    <a href="/images?q=what+the+future+looks+like">Images</a>
+    <a href="/news?q=today">News</a>
+    <div class="avatar">F</div>
+  </div>
+  <main>
+    <div class="logo"><span class="b1">F</span><span class="r">o</span><span class="y">o</span><span class="b1">g</span><span class="g">l</span><span class="r">e</span></div>
+    <form action="/search" method="get">
+      <div class="searchbox">
+        <svg focusable="false" height="20" width="20" viewBox="0 0 24 24"><path fill="#9aa0a6" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
+        <input type="text" name="q" autocomplete="off" autofocus aria-label="Search">
+      </div>
+      <div class="buttons">
+        <button type="submit">Foogle Search</button>
+        <button type="submit" name="lucky" value="1">I'm Feeling Lucky</button>
+      </div>
+    </form>
+    <div class="tagline">Search the web that doesn't exist yet.</div>
+  </main>
+  <footer>
+    <div class="row"><span>Anywhere, Anywhen</span></div>
+    <div class="row">
+      <span>
+        <a href="/search?q=about+foogle">About</a><a href="/search?q=foogle+advertising">Advertising</a><a href="/search?q=foogle+careers">Business</a>
+      </span>
+      <span>
+        <a href="/search?q=foogle+privacy+policy">Privacy</a><a href="/search?q=foogle+terms+of+service">Terms</a><a href="/search?q=foogle+settings">Settings</a>
+      </span>
+    </div>
+  </footer>
+</body>
+</html>

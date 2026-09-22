@@ -1,0 +1,7 @@
+node_modules/
+.env
+.foogle-cache/
+.env.*
+!.env.example
+.DS_Store
+*.log
