@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 test("default launcher uses Luna and Jev for search, pages and cached revisits", async t => {
   const script = `
@@ -14,19 +17,37 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
       if (String(url) !== "https://openrouter.ai/api/v1/chat/completions" || p.model !== "openai/gpt-6-luna") {
         throw new Error("Unexpected provider or model");
       }
-      if (p.stream) {
-        const result = JSON.stringify({title:"Gardeners",url:"https://garden.example/repairs",snippet:"Greenhouse repairs"}) + "\\n";
-        return new Response('data: ' + JSON.stringify({choices:[{delta:{content:result},finish_reason:"stop"}]}) + '\\n\\ndata: [DONE]\\n\\n', {headers:{"Content-Type":"text/event-stream"}});
+      const system = p.messages[0].content;
+      const sse = (content) => new Response('data: ' + JSON.stringify({choices:[{delta:{content},finish_reason:"stop"}]}) + '\\n\\ndata: [DONE]\\n\\n', {headers:{"Content-Type":"text/event-stream"}});
+      if (system.includes("ONE section")) {
+        sections++;
+        console.log("SECTION_CALL=" + sections);
+        return sse('<section><h2>Garden repairs</h2><p>Section '+sections+'</p><a href="/web/garden.example/archive">Archive</a></section>');
       }
-      sections++;
-      console.log("SECTION_CALL=" + sections);
-      return Response.json({choices:[{message:{content:'<section><h2>Garden repairs</h2><p>Section '+sections+'</p><a href="/web/garden.example/archive">Archive</a></section>'},finish_reason:"stop"}]});
+      if (system.includes("fact sheet")) {
+        console.log("FACTS_CALL");
+        return sse("- The greenhouse glazier is Ada Moss.\\nGlass costs $38 a pane.");
+      }
+      if (p.stream) {
+        return sse(JSON.stringify({site:"Gardeners Guild",title:"Gardeners",url:"https://garden.example/repairs",snippet:"Greenhouse repairs",kind:"forum",meta:"4.8★ · 212 reviews"}) + "\\n");
+      }
+      if (system.includes("vector illustrator")) {
+        console.log("ART_PROMPT=" + JSON.stringify(p.messages[1].content));
+        return Response.json({choices:[{message:{content:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#7ab"/></svg>'},finish_reason:"stop"}]});
+      }
+      if (system.includes("overview writer")) {
+        return Response.json({choices:[{message:{content:JSON.stringify({title:"Greenhouses",summary:"Reglaze cracked panes in spring.",ask:[{q:"How long does glazing last?",a:"About 20 years."}],related:["cold frames"]})},finish_reason:"stop"}]});
+      }
+      throw new Error("Unexpected request");
     };
     await import("./scripts/start.js");
   `;
+  // A fresh image cache, so art is generated (not read from a real run's disk cache).
+  const imageCache = await mkdtemp(path.join(tmpdir(), "foogle-img-"));
+  t.after(() => rm(imageCache, { recursive: true, force: true }));
   const child = spawn(process.execPath, ["--input-type=module", "-e", script, "--", "--port", "0"], {
     cwd: new URL("..", import.meta.url),
-    env: { ...process.env, OPENROUTER_API_KEY: "test", TYPESAFE_API_KEY: "test", FOOGLE_PRESET: "", FOOGLE_PAGE_MODE: "", FOOGLE_PAGE_SECTIONS: "3" },
+    env: { ...process.env, OPENROUTER_API_KEY: "test", TYPESAFE_API_KEY: "test", FOOGLE_IMAGE_CACHE: imageCache },
     stdio: ["ignore", "pipe", "pipe"],
   });
   t.after(async () => { child.kill(); await once(child, "exit"); });
@@ -43,18 +64,35 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   const base = `http://localhost:${port}`;
   const search = await fetch(`${base}/search?q=greenhouse`);
   assert.equal(search.status, 200);
-  assert.match(await search.text(), /Gardeners/);
+  const serp = await search.text();
+  assert.match(serp, /Gardeners Guild/);
+  assert.match(serp, /<span class="rkind">Forum<\/span>/);
+  assert.match(serp, /&amp;fk=forum/); // the page learns what kind of result was clicked
+  // The overview panel is streamed into its slot; related searches close the page.
+  assert.match(serp, /<template id="kpt">[\s\S]*Reglaze cracked panes/);
+  assert.match(serp, /People also search for[\s\S]*cold%20frames/);
+  const page2 = await (await fetch(`${base}/search?q=greenhouse&page=2`)).text();
+  assert.match(page2, /Page 2 of about/);
+  assert.match(page2, /href="\/search\?q=greenhouse&page=3">Next/);
+  const form = await fetch(`${base}/web/garden.example/search`, { method: "POST", body: new URLSearchParams({ q: "glass panes" }), redirect: "manual" });
+  assert.equal(form.status, 303);
+  assert.equal(form.headers.get("location"), "/web/garden.example/search?q=glass+panes");
   const lucky = await fetch(`${base}/search?q=greenhouse&lucky=1`, { redirect: "manual" });
   assert.equal(lucky.status, 302);
   assert.match(lucky.headers.get("location"), /^\/web\/garden.example/);
   const url = `${base}/web/garden.example/repairs?fq=greenhouse&ft=Gardeners`;
   const page = await (await fetch(url)).text();
-  assert.equal((page.match(/<section>/g) || []).length, 3);
+  assert.equal((page.match(/<section>/g) || []).length, 4);
   assert.match(page, /<\/html>/);
-  assert.match(output, /pages:.*openai\/gpt-6-luna \(jev\)/);
-  assert.match(output, /SECTION_CALL=3/);
-  assert.ok(!output.includes("SECTION_CALL=4"));
+  assert.match(output, /model:.*openai\/gpt-6-luna/);
+  assert.match(output, /SECTION_CALL=4/);
+  // Hero art is an SVG illustration drawn in the site's palette.
+  const art = page.match(/<img class="art" src="([^"]+)"/)[1].replaceAll("&amp;", "&");
+  const svg = await (await fetch(base + art)).text();
+  assert.match(svg, /^<svg/);
+  assert.match(output, /ART_PROMPT=.*Palette: the image sits on a page with background \S+ and accent hsl\(/);
+  assert.equal(output.match(/ART_PROMPT=/g).length, 1); // warmed and fetched as the same image
   const cached = await (await fetch(url)).text();
-  assert.match(cached, /Section 3/);
-  assert.ok(!output.includes("SECTION_CALL=4"));
+  assert.match(cached, /Section 4/);
+  assert.ok(!output.includes("SECTION_CALL=5"));
 });
