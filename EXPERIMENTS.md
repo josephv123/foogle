@@ -113,6 +113,22 @@ A whole Images page (12 pictures) finishes in about the same time as before; six
 
 Things that broke and are now guarded: a model repeats an attribute (`fill="#333" … fill="none"`), or writes a bare `&` in a label, and the whole SVG renders blank (the sanitizer now dedupes attributes and escapes `&`); a frame drawn as a `<path>` without `fill="none"` blacks out the picture (the brief now says so); displacement filters leave ragged bare edges unless the background stays unfiltered.
 
+## Pages: "Model hit the output token limit"
+
+About 1 page in 16 lost a section to this error, and the visitor got the "collapsed mid-construction" toast. Measured on 47 fresh pages built from 56 real search results for 14 varied queries (every site kind, Jev picking the styles), with each section call's finish reason, usage and raw text recorded:
+
+- Sections are not too long for their budget. By the time they close, sections take p50 ~400 output tokens and at most ~1,050, even with a calculator, quiz, form or tabs in them (interactive p50 ~510, plain p50 ~330), against `max_tokens` 1600. No reasoning tokens are spent (`reasoning: {enabled: false}` holds), and no section drew an inline SVG.
+- Every truncated section had already closed. 8 of 188 sections (4%) kept writing after `</section>`: a thousand tokens of blank lines, a `<style>` block, or notes to itself ("But word count 134? fine…") followed by the whole section again. None of that reached the page, but the page waited for it (those sections took 6-13s instead of ~4s), and the 3 that ran to 1600 tokens failed the page.
+
+Now a section is finished at its own closing tag: the page moves on, and the rest of the reply is read in the background only so its cost still reaches the daily budget (`onUsage`), with a token-limit error there ignored. A section that the limit still cuts off before it closes keeps its whole blocks and is closed there. That never happened naturally; with a forced 300-token limit, all 8 truncated sections were kept.
+
+| Same 47 inputs, 4 pages at a time | Token-limit failures | Shell p50 | First section p50 | Page p50 | Page p90 | Page max |
+|---|---:|---:|---:|---:|---:|---:|
+| before | 3 (6.4%) | 0.22s | 1.01s | 6.7s | 8.7s | 14.3s |
+| after | 0 | 0.19s | 1.00s | 6.3s | 7.9s | 10.5s |
+
+In the "after" run, 10 sections ran on and 5 of them reached the limit, which would have failed 5 pages before. Page times are for pages that completed. The runs turned up one unrelated failure: twice in a row, the provider's stream died mid-section ("Stream ended before a terminal response event").
+
 ## Live references
 
 - [OpenRouter model catalog](https://openrouter.ai/api/v1/models) — exact IDs and prices were checked before trials.
