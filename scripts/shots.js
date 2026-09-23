@@ -96,6 +96,11 @@ const PAGES = [
   { name: "answer-stock", path: "/search?q=NVDA%20stock", steps: [{ click: "[data-tab='1Y']" }, { wait: ".ia-stock-change:has-text('past year')" }] },
   { name: "answer-dict", path: "/search?q=define%20serendipity", steps: [{ click: ".ia-more" }] },
   { name: "answer-time", path: "/search?q=time%20in%20lagos", steps: [{ wait: ".ia-time-rel:not(:empty)" }] },
+  // Tools asked for with nothing in them open at their defaults.
+  { name: "answer-calc-blank", path: "/search?q=calculator", steps: [{ wait: ".ia-calc-main:text-is('0')" }, { click: "[data-k='1']" }, { click: "[data-k='2']" }, { click: "[data-k='+']" }, { click: "[data-k='3']" }, { click: "[data-k='=']" }, { wait: ".ia-calc-main:text-is('15')" }] },
+  { name: "answer-units-blank", path: "/search?q=unit%20converter", steps: [{ wait: ".ia-num >> nth=1" }, { fill: [".ia-num >> nth=0", "2.5"] }] },
+  { name: "answer-currency-blank", path: "/search?q=currency%20converter", steps: [{ wait: ".ia-fx-big" }] },
+  { name: "answer-time-local", path: "/search?q=what%20time%20is%20it", steps: [{ wait: ".ia-time-big:not(:empty)" }] },
   { name: "answer-sports", path: "/search?q=lakers%20score" },
   { name: "answer-flight", path: "/search?q=flight%20UA%20902" },
   { name: "didyoumean", path: "/search?q=recieve%20package", steps: [{ wait: ".dym-line" }] },

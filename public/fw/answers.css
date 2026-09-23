@@ -158,8 +158,8 @@
 .ia-dictionary.open .ia-more .opened { display: inline; }
 
 /* ---------- time ---------- */
-.ia-time-big { font-size: 56px; line-height: 1.15; }
-.ia-time-date { font-size: 16px; color: #4d5156; margin-top: 4px; }
+.ia-time-big { font-size: 56px; line-height: 1.15; min-height: 1.15em; }
+.ia-time-date { font-size: 16px; color: #4d5156; margin-top: 4px; min-height: 1.3em; }
 .ia-time-where { color: #70757a; margin-top: 8px; }
 .ia-time-rel { font-size: 13px; color: #70757a; min-height: 20px; margin-top: 2px; }
 

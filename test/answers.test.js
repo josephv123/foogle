@@ -8,10 +8,10 @@ import path from "node:path";
 import {
   calc, evaluate, units, exchange, convertUnit, unitFormula, stockSeries, fxSeries, findUnit, rangeLabels,
 } from "../public/fw/answers.js";
-import { createAnswers, byCode, cityTime, decide, checkFix, NORMALIZE, CARD_P, TYPO_P } from "../lib/answers.js";
+import { createAnswers, byCode, cityTime, decide, checkFix, NORMALIZE, BLANK, CARD_P, TYPO_P, BLANK_P } from "../lib/answers.js";
 import { RENDER, didYouMean } from "../lib/answer-cards.js";
 import { answerPrompt, spellPrompt } from "../lib/prompts.js";
-import { searchQuestions } from "../lib/jev.js";
+import { searchQuestions, classifyQuery } from "../lib/jev.js";
 import { fakeReply, fakeJevAnswers } from "../lib/fake-fixtures.js";
 import { ACTION_USD } from "../lib/limits.js";
 
@@ -250,6 +250,75 @@ test("a card the model fills reserves its space first, then fills it; code cards
   assert.match(words.html, /ia-calc-main">397\.8</);
 });
 
+test("a tool asked for with nothing in it opens at its defaults, free and with no model call", async () => {
+  // Jev says which tool and that the query gave it nothing; code has nothing to read.
+  const bare = (query, type) => run({ query, jev: { type, p: 0.9, blank: 0.95, typo: 0 } });
+  for (const q of ["calculator", "calc", "online calculator", "scientific calculator"]) {
+    const r = await bare(q, "calculator");
+    assert.deepEqual([r.calls, r.charged, r.out.length], [[], [], 1], q);
+    assert.match(r.html, /<div class="ia-calc-top"><\/div><div class="ia-calc-main">0<\/div>/, q);
+    assert.doesNotMatch(r.html, /ia-skel/, q);
+  }
+  for (const q of ["unit converter", "convert units"]) {
+    const r = await bare(q, "units");
+    assert.deepEqual([r.calls, r.charged], [[], []], q);
+    assert.match(r.html, /<option value="length" selected>/, q);
+    assert.match(r.html, /aria-label="From" value="1"><select class="ia-unit" aria-label="From unit">[\s\S]*?<option value="meter" selected>/, q);
+    assert.match(r.html, /aria-label="To" value="100"><select class="ia-unit" aria-label="To unit">[\s\S]*?<option value="centimeter" selected>/, q);
+  }
+  for (const q of ["time", "what time is it"]) {
+    const r = await bare(q, "time");
+    assert.deepEqual([r.calls, r.charged], [[], []], q);
+    // The visitor's zone is only known in their browser: the runtime fills the clock in.
+    assert.match(r.html, /data-ia="time" data-ia-data="\{&quot;local&quot;:true\}"/, q);
+    assert.match(r.html, /<div class="ia-time-big"><\/div>[\s\S]*Your local time/, q);
+  }
+  const fx = await bare("currency converter", "currency");
+  assert.deepEqual([fx.calls, fx.charged], [[], []]);
+  assert.match(fx.html, /1 United States Dollar equals<\/div>\n<div class="ia-fx-big"><span>0\.852<\/span> <span>Euro/);
+
+  // Every default draws a valid card of its own type.
+  for (const [type, open] of Object.entries(BLANK)) assert.match(RENDER[type](open(ctx(type)), type), new RegExp(`data-ia="${type}"`));
+});
+
+test("a tool opens empty only when Jev says so and code has nothing to read", async () => {
+  // Jev isn't sure the query gave no input: the model reads it, as before.
+  const words = await run({ query: "seventeen percent of 2340", jev: { type: "calculator", p: 1, blank: BLANK_P - 0.1, typo: 0 }, reply: { card: { expr: "17% * 2340" } } });
+  assert.deepEqual(words.charged, ["answer"]);
+  assert.match(words.html, /ia-calc-main">397\.8</);
+  // Input code can read wins over Jev's guess.
+  const sum = await run({ query: "6*7", jev: { type: "calculator", p: 1, blank: 0.9, typo: 0 } });
+  assert.match(sum.html, /ia-calc-top">6\*7 =<\/div><div class="ia-calc-main">42</);
+  const city = await run({ query: "what time is it in tokyo", jev: { type: "time", p: 1, blank: 0.9, typo: 0 } });
+  assert.match(city.html, /Time in Tokyo, Japan/);
+  // Cards that need data have no empty form: "weather" still asks the model.
+  const wx = await run({ query: "weather", jev: { type: "weather", p: 1, blank: 0.9, typo: 0 }, reply: { card: WEATHER } });
+  assert.deepEqual(wx.charged, ["answer"]);
+  assert.match(wx.html, /Results for <b>Tokyo, Japan<\/b>/);
+  // "mortgage calculator" is a tool with nothing in it, but not this one: Jev's "none" decides.
+  const other = await run({ query: "mortgage calculator", jev: { type: "none", p: 0.93, blank: 0.98, typo: 0 } });
+  assert.deepEqual([other.html, other.calls], ["", []]);
+});
+
+test("the classifier asks whether the query gave its tool anything, in the same request", async () => {
+  const bodies = [];
+  const fetchImpl = async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return Response.json({ answers: { answer: { choice: "calculator", confidence: 0.9, probabilities: { calculator: 0.97 } }, blank: { noul: 0.98 }, typo: { noul: 0.02 } } });
+  };
+  assert.deepEqual(await classifyQuery("calc", { apiKey: "k", fetchImpl }), { type: "calculator", p: 0.97, blank: 0.98, typo: 0.02 });
+  assert.equal(bodies.length, 1);
+  assert.deepEqual(Object.keys(bodies[0].questions), ["answer", "blank", "typo"]);
+  const old = async () => Response.json({ answers: { answer: { choice: "units", probabilities: { units: 1 } }, typo: { noul: 0.1 } } });
+  assert.equal((await classifyQuery("x", { apiKey: "k", fetchImpl: old })).blank, 0, "no answer counts as not blank");
+  // Fake mode tells bare tools from tools given their input.
+  const fake = (q) => fakeJevAnswers({ state: { query: q }, questions: searchQuestions });
+  for (const [q, type] of [["calculator", "calculator"], ["unit converter", "units"], ["what time is it", "time"]]) {
+    assert.deepEqual([fake(q).answer.choice, fake(q).blank.noul >= BLANK_P], [type, true], q);
+  }
+  for (const q of ["17% of 2340", "time in lagos", "5 miles in km"]) assert.ok(fake(q).blank.noul < BLANK_P, q);
+});
+
 test("a failed or refused card gives its space back", async () => {
   const broken = await run({ query: "lakers score", jev: { type: "sports", p: 1, typo: 0 }, reply: { card: "sorry, no JSON" } });
   assert.equal(broken.out.length, 2);
@@ -307,8 +376,8 @@ test("the results page streams the card into a reserved slot without holding up 
         await sleep(400);
         if (!p.questions.answer) return Response.json({ answers: { kind: { choice: "blog" } } });
         const q = p.state.query;
-        const choice = q.startsWith("weather") ? "weather" : q.includes("%") ? "calculator" : "none";
-        return Response.json({ answers: { answer: { choice, confidence: 1, probabilities: { [choice]: 1 } }, typo: { noul: q.startsWith("recieve") ? 0.97 : 0.03 } } });
+        const choice = q.startsWith("weather") ? "weather" : q.includes("%") || q.includes("calc") ? "calculator" : "none";
+        return Response.json({ answers: { answer: { choice, confidence: 1, probabilities: { [choice]: 1 } }, blank: { noul: q === "calculator" ? 0.98 : 0.02 }, typo: { noul: q.startsWith("recieve") ? 0.97 : 0.03 } } });
       }
       const system = p.messages[0].content;
       if (system.includes("weather answer card")) { await sleep(300); return json(${JSON.stringify(JSON.stringify(WEATHER))}); }
@@ -352,6 +421,9 @@ test("the results page streams the card into a reserved slot without holding up 
   const calc = await get("17% of 2340");
   assert.match(calc, /ia-calc-main">397\.8</);
   assert.doesNotMatch(calc, /ia-skel/, "a code card needs no placeholder");
+  const blank = await get("calculator");
+  assert.match(blank, /ia-calc-top"><\/div><div class="ia-calc-main">0</, "a bare calculator opens at 0");
+  assert.doesNotMatch(blank, /ia-skel/);
   const dym = await get("recieve package");
   assert.match(dym, /Did you mean: <a href="\/search\?q=receive%20package">/);
   const plain = await get("storm lanterns");
@@ -362,4 +434,6 @@ test("the results page streams the card into a reserved slot without holding up 
   const css = await fetch(`http://localhost:${port}/fw/answers.css`);
   assert.equal(css.status, 200);
   assert.match(output, /\[answers\] "weather tokyo" → weather/);
+  assert.match(output, /\[answers\] "calculator" → calculator \(blank\)/);
+  assert.doesNotMatch(output, /calculator card: /, "no model call, no failure");
 });
