@@ -21,6 +21,7 @@ import {
 } from "./lib/interact.js";
 import { createLimits } from "./lib/limits.js";
 import { createDoodles, doodleRoutes, doodleHomepage } from "./lib/doodle.js";
+import { createSuggester, normalizeQuery, SUGGEST } from "./lib/suggest.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -303,11 +304,12 @@ body { font-family: arial, sans-serif; color: #202124; }
   <a class="logo" href="/"><span class="b1">F</span><span class="r">o</span><span class="y">o</span><span class="b1">g</span><span class="g">l</span><span class="r">e</span></a>
   <form action="${TABS.find(([l]) => l === active)?.[1] ?? "/search"}" method="get" style="flex:1;min-width:280px;max-width:584px">
     <div class="searchbox">
-      <input type="text" name="q" value="${q}" autocomplete="off">
+      <input type="text" name="q" value="${q}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search" data-suggest>
       <button type="submit" aria-label="Search"><svg height="22" width="22" viewBox="0 0 24 24"><path fill="#4285f4" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></button>
     </div>
   </form>
 </div>
+<script type="module" async src="/suggest.js"></script>
 <div class="tabs">${tabs}</div>
 <div class="serp${aside ? " has-aside" : ""}">${aside ? KP_LOADING : ""}
 <div id="shimmer"><div class="note">Searching the future web…</div><div class="bar" style="width:62%"></div><div class="bar" style="width:88%"></div><div class="bar" style="width:74%"></div><div class="bar" style="width:81%"></div><div class="bar" style="width:55%"></div></div>
@@ -660,6 +662,55 @@ const LUCKY_QUERIES = [
   "mars colony local news", "antique teleporter repair", "dragon egg incubator", "museum of lost sounds",
   "orbital farmers market", "dream recording app", "subterranean jazz club", "weather control complaints",
 ];
+
+// ---------- search suggestions ----------
+// GET /api/suggest?q=cn answers {"q":"cn","suggestions":[
+//   {"type":"site","q":"cnn","domain":"cnn.com","title":"CNN"}, {"type":"search","q":"cnn live"}, …]}.
+// A "site" is a real, well-known site the model thinks the visitor is heading
+// for (its icon: /api/favicon?url=/web/cnn.com).
+// With &stream=1 (or Accept: application/x-ndjson) each suggestion is one JSON
+// line, sent the moment it's written. Whatever stops suggestions (over a
+// limit, no key, a slow or failing model) answers with none, and the search
+// box simply shows no dropdown. public/suggest.js is the client.
+const suggester = createSuggester();
+// The empty box and the first letters are what everyone asks for, so the
+// first visitor to type has them all written, for everyone after (27 small
+// calls, about $0.0005). SUGGEST_WARM=0 turns it off.
+let warmed = process.env.SUGGEST_WARM === "0";
+app.get("/api/suggest", async (req, res) => {
+  const key = normalizeQuery([].concat(req.query.q ?? "")[0]);
+  const streamed = req.query.stream === "1" || /ndjson/.test(req.get("accept") ?? "");
+  const none = (status = 200) => res.status(status).setHeader("Cache-Control", "no-store").json({ q: key, suggestions: [] });
+  if (!config.apiKey) return none();
+  if (!warmed && limits.status().spentUsd < limits.config.dailyBudgetUsd) {
+    warmed = true;
+    suggester.warm(["", ..."abcdefghijklmnopqrstuvwxyz"]);
+  }
+  let entry = suggester.lookup(key);
+  const source = entry ? (entry.done ? "hit" : "join") : "miss";
+  if (!entry) {
+    if (suggester.busy()) return (res.setHeader("Retry-After", "2"), none(503));
+    const { ok, status, wait } = limits.check(req, key.length >= SUGGEST.longAt ? "suggestLong" : "suggest");
+    if (!ok) return (res.setHeader("Retry-After", String(wait)), none(status));
+    entry = suggester.start(key);
+  }
+  res.setHeader("X-Suggest", source);
+  // A finished list never changes, so the browser may keep it (trending
+  // changes every half hour, so not that one).
+  res.setHeader("Cache-Control", source === "hit" && key ? "public, max-age=3600" : "no-store");
+  if (!streamed) {
+    const suggestions = [];
+    for await (const item of suggester.follow(entry)) suggestions.push(item);
+    return res.json({ q: key, suggestions });
+  }
+  res.type("application/x-ndjson").setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+  for await (const item of suggester.follow(entry)) {
+    if (res.destroyed) break;
+    res.write(`${JSON.stringify(item)}\n`);
+  }
+  res.end();
+});
 
 // "I'm Feeling Lucky": redirect off the first streamed result line.
 app.get("/search", async (req, res, next) => {

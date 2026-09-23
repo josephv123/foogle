@@ -9,7 +9,9 @@
 // adds one entry per page the visible tab opens, which the real back button
 // (or a phone's back gesture) walks, always in the visible tab.
 const v = new URL(import.meta.url).search;
-const { addressOf, displayURL, isHome, tabTitle, classify, primaryRows, recentRows, rememberSearch, svgImage, FOOGLE_ICON } = await import(`./browsing.js${v}`);
+const { addressOf, displayURL, isHome, tabTitle, classify, primaryRows, recentRows, searchPath, svgImage, FOOGLE_ICON } = await import(`./browsing.js${v}`);
+// AI suggestions and recent searches, shared with Foogle's own search boxes.
+const { createEngine, normalize, recordSearch, recentSearches, removeRecent, completionHTML, siteHref, siteIcon, ICONS: SUGGEST_ICONS } = await import("/suggest.js");
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const ui = {
@@ -442,59 +444,117 @@ $(".sw-new").addEventListener("click", () => { toggleSwitcher(false); newTab(); 
 // an abort signal, for when the text changes) and resolves to rows
 // ({ kind, label, detail, fill, target }, see public/fw/browsing.js). Rows
 // show as each source answers, in this order; ones that go to the same place
-// are shown once, first wins. The list is the place to add more, such as
-// /api/suggest.
+// are shown once, first wins.
 const here = location.host;
-// Recent searches, newest first, shared with Foogle's own search boxes.
-const RECENT = "foogle.recent";
-const recent = () => { try { return JSON.parse(localStorage.getItem(RECENT)) ?? []; } catch { return []; } };
 const fromServer = (path) => async (text, signal) => (await (await fetch(`${path}?${new URLSearchParams({ q: text })}`, { signal })).json()).rows ?? [];
+
+// AI suggestions (/api/suggest, through public/suggest.js): what's shown now
+// comes from lists already fetched, and more stream in (see aiArrived). A
+// site the model thinks the text names comes first, with its favicon. A URL
+// goes where it says, so it gets none.
+const ai = createEngine({ onChange: () => aiArrived() });
+let aiShown = { key: null, items: [] };
+function aiRows(text) {
+  const key = normalize(text);
+  if (key.trim() && classify(text, { here }).kind !== "search") return [];
+  let items = ai.pool(key);
+  if (aiShown.key === key) {
+    // Rows on screen stay put while the text does; new ones join below.
+    const kept = aiShown.items.filter((i) => items.includes(i));
+    items = [...kept, ...items.filter((i) => !kept.includes(i))];
+  } else {
+    const site = items.findIndex((i) => i.type === "site");
+    if (site > 0) items = [items[site], ...items.filter((_, j) => j !== site)];
+  }
+  aiShown = { key, items };
+  return items.map((i) => (i.type === "site"
+    ? { kind: "site", label: i.domain, detail: i.title && i.title.toLowerCase() !== i.domain ? i.title : "", fill: i.domain, target: siteHref(i), icon: siteIcon(i.domain) }
+    : { kind: key ? "suggest" : "trend", label: i.q, detail: "", fill: i.q, target: searchPath(i.q) }));
+}
 const SOURCES = [
   async (text) => primaryRows(text, { here }), // the first is what Enter does
-  async (text) => recentRows(text, recent()),
+  async (text) => recentRows(text, recentSearches()),
   fromServer("/api/sites"), // known sites the text names (lib/brands.js)
+  async (text) => { ai.set(classify(text, { here }).kind === "search" ? text : ""); return aiRows(text); },
 ];
+const AI_SOURCE = SOURCES.length - 1;
 const ROW_ICONS = {
   search: "M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z",
   url: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 17.93A8 8 0 0 1 4 12c0-.62.08-1.21.21-1.79L9 15v1a2 2 0 0 0 2 2v1.93zm6.9-2.54A2 2 0 0 0 16 16h-1v-3a1 1 0 0 0-1-1H8v-2h2a1 1 0 0 0 1-1V7h2a2 2 0 0 0 2-2v-.41a7.98 7.98 0 0 1 2.9 12.8z",
 };
 ROW_ICONS.site = ROW_ICONS.url;
 ROW_ICONS.recent = "M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z";
+ROW_ICONS.suggest = ROW_ICONS.search;
+ROW_ICONS.trend = SUGGEST_ICONS.trend;
 let rows = [];
+let lists = [];
 let picked = 0;
 let typed = "";
 let asking = null;
+// With nothing typed (a new tab), the field offers recent searches and
+// what's trending, as Foogle's search boxes do, and nothing is picked:
+// arrowing past either end comes back to the empty field.
+const zero = () => !typed.trim();
+
+// Rows that go to the same place show once: a site by its host, a search by
+// its words, whatever their case.
+function rowKey(r) {
+  const host = r.kind === "site" && r.target.match(/^\/web\/(?:www\.)?([^/?#]+)/)?.[1];
+  if (host) return `site:${host}`;
+  return r.kind === "url" ? r.target : `q:${normalize(r.fill).trim()}`;
+}
+
+function showRows() {
+  const seen = new Set();
+  rows = lists.flat().filter((r) => !seen.has(rowKey(r)) && seen.add(rowKey(r))).slice(0, zero() ? 10 : 8);
+  picked = zero() ? Math.min(picked, rows.length - 1) : Math.max(0, Math.min(picked, rows.length - 1));
+  renderDrop();
+}
 
 function suggest() {
   typed = ui.input.value;
   const text = typed.trim();
   asking?.abort();
   const ask = asking = new AbortController();
+  if (!text) {
+    picked = -1;
+    ai.set("");
+    lists = [recentSearches().slice(0, 6).map((q) => ({ kind: "recent", label: q, detail: "", fill: q, target: searchPath(q) })), aiRows("")];
+    return showRows();
+  }
   picked = 0;
-  if (!text) return closeDrop();
-  const lists = SOURCES.map(() => []);
+  lists = SOURCES.map(() => []);
   SOURCES.forEach((source, i) => source(text, ask.signal).then((list) => {
     if (ask.signal.aborted) return; // typed on since
     lists[i] = list;
-    const seen = new Set();
-    rows = lists.flat().filter((r) => !seen.has(r.target) && seen.add(r.target)).slice(0, 8);
-    picked = Math.min(picked, rows.length - 1);
-    renderDrop();
+    showRows();
   }, () => {}));
+}
+
+// Streamed AI suggestions for what's in the field arrived.
+function aiArrived() {
+  if (document.activeElement !== ui.input || asking?.signal.aborted || !lists.length) return;
+  lists[zero() ? 1 : AI_SOURCE] = aiRows(typed.trim() ? typed : "");
+  showRows();
 }
 
 function renderDrop() {
   if (!rows.length) return hideDrop();
-  ui.drop.replaceChildren(...rows.map((row, i) => {
+  const trendAt = rows.findIndex((r) => r.kind === "trend");
+  ui.drop.replaceChildren(...rows.flatMap((row, i) => {
     const el = document.createElement("div");
     el.className = "row";
+    el.dataset.kind = row.kind;
     el.id = `suggestion-${i}`;
     el.setAttribute("role", "option");
     el.setAttribute("aria-selected", String(i === picked));
-    el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ROW_ICONS[row.kind] ?? ROW_ICONS.search}"/></svg>`;
+    if (row.icon) el.append(Object.assign(document.createElement("img"), { className: "ico", src: row.icon, alt: "" }));
+    else el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ROW_ICONS[row.kind] ?? ROW_ICONS.search}"/></svg>`;
     const label = document.createElement("span");
     label.className = "label";
-    label.textContent = row.label;
+    // Like Google, what was typed in normal weight and the completion in bold.
+    if (["suggest", "recent", "site"].includes(row.kind)) label.innerHTML = completionHTML(row.label, typed);
+    else label.textContent = row.label;
     el.append(label);
     if (row.detail) {
       const detail = document.createElement("span");
@@ -502,13 +562,28 @@ function renderDrop() {
       detail.textContent = row.detail;
       el.append(detail);
     }
+    if (row.kind === "recent") {
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "rm";
+      rm.tabIndex = -1;
+      rm.textContent = "Remove";
+      rm.setAttribute("aria-label", `Remove ${row.label} from recent searches`);
+      rm.addEventListener("click", (e) => { e.stopPropagation(); removeRecent(row.label); suggest(); });
+      el.append(rm);
+    }
     el.addEventListener("mousedown", (e) => e.preventDefault()); // keep the field focused
     el.addEventListener("click", () => goTo(row.target));
-    return el;
+    if (i !== trendAt) return [el];
+    const head = document.createElement("div");
+    head.className = "head";
+    head.textContent = "Trending searches";
+    return [head, el];
   }));
   ui.drop.hidden = false;
   ui.form.classList.add("open");
-  ui.input.setAttribute("aria-activedescendant", `suggestion-${picked}`);
+  if (picked >= 0) ui.input.setAttribute("aria-activedescendant", `suggestion-${picked}`);
+  else ui.input.removeAttribute("aria-activedescendant");
 }
 
 function closeDrop() {
@@ -525,8 +600,9 @@ function hideDrop() {
 // What Enter does: the picked row, or for text never suggested on (the
 // script's rows arrive a moment after typing), what the text itself means.
 function goTo(target) {
-  const query = target.startsWith("/search?") && new URLSearchParams(target.slice(8)).get("q");
-  if (query) { try { localStorage.setItem(RECENT, JSON.stringify(rememberSearch(recent(), query))); } catch { /* storage off */ } }
+  const query = (target.startsWith("/search?") && new URLSearchParams(target.slice(8)).get("q"))
+    || (target.startsWith("/web/") && new URL(target, location.href).searchParams.get("fq"));
+  if (query) recordSearch(query);
   closeDrop();
   ui.input.blur();
   navigate(active, target);
@@ -535,7 +611,13 @@ function goTo(target) {
 
 ui.input.addEventListener("input", suggest);
 ui.input.addEventListener("keydown", (e) => {
-  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rows.length) {
+  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rows.length && zero()) {
+    e.preventDefault();
+    const n = rows.length;
+    picked = e.key === "ArrowDown" ? (picked + 1 >= n ? -1 : picked + 1) : (picked < 0 ? n - 1 : picked - 1);
+    ui.input.value = picked >= 0 ? rows[picked].fill : typed;
+    renderDrop();
+  } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && rows.length) {
     e.preventDefault();
     picked = (picked + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
     ui.input.value = picked === 0 ? typed : rows[picked].fill;
@@ -552,7 +634,7 @@ ui.form.addEventListener("submit", (e) => {
   const text = ui.input.value.trim();
   if (!text) return;
   const row = rows[picked];
-  goTo(row && (picked > 0 || ui.input.value === typed) ? row.target : classify(text, { here }).target);
+  goTo(row && (picked > 0 || ui.input.value === typed || zero()) ? row.target : classify(text, { here }).target);
 });
 
 // Select everything on the first click, like an omnibox; a second click
@@ -569,6 +651,7 @@ ui.input.addEventListener("mousedown", (e) => {
 });
 ui.input.addEventListener("focus", () => {
   focusedAt = Date.now();
+  if (!ui.input.value.trim()) suggest(); // a new tab: recent searches and trends
   setTimeout(() => { if (document.activeElement === ui.input && ui.input.selectionStart === ui.input.selectionEnd) ui.input.select(); }, 0);
 });
 ui.input.addEventListener("mouseup", (e) => { if (Date.now() - focusedAt < 400) e.preventDefault(); });
