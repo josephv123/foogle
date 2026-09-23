@@ -12,6 +12,7 @@ import {
 import { generatePage } from "./lib/pages.js";
 import { siteMark } from "./lib/icons.js";
 import { PAGE_CSP } from "./lib/widgets.js";
+import { browserBar, browserBarRoutes } from "./lib/browserbar.js";
 import {
   createState, interactRoutes, visitor, replyWriter,
   submissionTitle, submissionSummary, responseBriefs, receiptSection,
@@ -504,7 +505,7 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
     const page = paged ? Math.min(PAGES, Math.max(1, parseInt(req.query.page, 10) || 1)) : 1;
     const cacheKey = `${tab}:${page}:${query.toLowerCase()}`;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    if (serpCache.has(cacheKey)) return res.send(serpCache.get(cacheKey));
+    if (serpCache.has(cacheKey)) return res.send(browserBar(req) + serpCache.get(cacheKey));
     if (!limits.allow(req, res, tab === "All" ? "search" : tab.toLowerCase())) return;
 
     let html = "";
@@ -526,6 +527,7 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
           (err) => console.warn(`[${tab.toLowerCase()}] side panel: ${err.message}`),
         ).finally(() => { sideDone = true; })
       : null;
+    res.write(browserBar(req, { loading: true }));
     emit(shell(query, tab, page, { aside: side }));
     res.flushHeaders?.();
 
@@ -579,6 +581,7 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
 // The interactive-component runtime is versioned by content (see widgetHead),
 // so browsers keep it for good and pages never wait on it twice.
 app.use("/fw", express.static(path.join(__dirname, "public", "fw"), { maxAge: "1y", immutable: true }));
+app.use(browserBarRoutes());
 app.use(express.static(path.join(__dirname, "public")));
 // Posting a comment is free; the reply someone writes to it is a model call.
 // Over the limit, the comment still posts and just gets no reply.
@@ -917,11 +920,11 @@ app.use("/web", async (req, res) => {
   res.setHeader("Content-Security-Policy", PAGE_CSP);
 
   const cached = pageCache.get(webPath);
-  if (cached) return res.send(cached);
+  if (cached) return res.send(browserBar(req) + cached);
   if (!inflight.has(webPath) && !limits.allow(req, res, "web")) return;
 
   // Instant feedback: loading bar + badge go out before the model's first byte.
-  res.write(vibePrelude(domain));
+  res.write(browserBar(req, { loading: true }) + vibePrelude(domain));
   res.flushHeaders?.();
 
   const { fq: query, fs: snippet, fk: resultKind } = req.query;

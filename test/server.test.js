@@ -116,6 +116,19 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   assert.match(cached, /Section 4/);
   assert.ok(!output.includes("SECTION_CALL=5"));
 
+  // Every page opens with a browser bar showing the URL a real browser would.
+  assert.match(page, /^<!DOCTYPE html><html><head>.*?<\/head><body>\n<foogle-bar(?: loading)? data-site>/s);
+  assert.match(page, /<input name="q" value="https:\/\/garden\.example\/repairs"/);
+  assert.match(cached, /^<!DOCTYPE html>[\s\S]*?<foogle-bar data-site>/);
+  assert.match(serp, /<foogle-bar loading>[\s\S]*value="https:\/\/www\.foogle\.com\/search\?q=greenhouse"/);
+  const home = await (await fetch(`${base}/`)).text();
+  assert.match(home, /<foogle-bar>[\s\S]*value="https:\/\/www\.foogle\.com\/"[\s\S]*I'm Feeling Lucky/);
+  // Its address field goes to sites or searches, like an omnibox.
+  const go = (q) => fetch(`${base}/go?q=${encodeURIComponent(q)}`, { redirect: "manual" }).then(r => r.headers.get("location"));
+  assert.equal(await go("garden.example/repairs"), "/web/garden.example/repairs");
+  assert.equal(await go("https://www.foogle.com/news?q=glass"), "/news?q=glass");
+  assert.equal(await go("greenhouse glass"), "/search?q=greenhouse+glass");
+
   // Generated pages may run only Foogle's scripts, and load its runtime.
   const res = await fetch(url);
   assert.match(res.headers.get("content-security-policy"), /script-src 'self' 'unsafe-hashes' 'sha256-/);
