@@ -156,8 +156,8 @@ test("a failed fact sheet never blocks the page", async () => {
   assert.equal(cleanFactLine("```"), null);
 });
 
-test("section pictures get the site palette, and a half-written picture src is never streamed", async () => {
-  assert.match(paintPictures('<img class="pic" src="/img/brass%20lamp" alt="">', plan), /src="\/img\/brass%20lamp\?bg=[^&"]+&amp;fg=[^&"]+"/);
+test("section pictures get the site palette and medium, and a half-written picture src is never streamed", async () => {
+  assert.match(paintPictures('<img class="pic" src="/img/brass%20lamp" alt="">', plan), /src="\/img\/brass%20lamp\?s=\w+&amp;a=landscape&amp;bg=[^&"]+&amp;fg=[^&"]+"/);
   assert.match(paintPictures('<img src="/img/brass lamp">', plan), /src="\/img\/brass%20lamp\?/);
   let push;
   const stream = () => (async function* () { for (;;) { const t = await new Promise(r => { push = r; }); if (t === null) return; yield t; } })();
@@ -172,7 +172,7 @@ test("section pictures get the site palette, and a half-written picture src is n
   push('%20lamp" alt=""></section>');
   await new Promise(resolve => setImmediate(resolve));
   push(null);
-  assert.match((await rest).value, /^<img class="pic" src="\/img\/brass%20lamp\?bg=/);
+  assert.match((await rest).value, /^<img class="pic" src="\/img\/brass%20lamp\?s=\w+&amp;a=landscape&amp;bg=/);
 });
 
 test("the hero's invented counts defer to ones the page already states", async () => {

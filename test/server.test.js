@@ -28,10 +28,13 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
         console.log("FACTS_CALL");
         return sse("- The greenhouse glazier is Ada Moss.\\nGlass costs $38 a pane.");
       }
+      if (system.includes("image index")) {
+        return sse(JSON.stringify({caption:"Greenhouse frame plans",site:"panes.example",path:"/plans",style:"blueprint",shape:"tall",image:"greenhouse frame side elevation"}) + "\\n");
+      }
       if (p.stream) {
         return sse(JSON.stringify({site:"Gardeners Guild",title:"Gardeners",url:"https://garden.example/repairs",snippet:"Greenhouse repairs",kind:"forum",meta:"4.8★ · 212 reviews"}) + "\\n");
       }
-      if (system.includes("vector illustrator")) {
+      if (system.includes("draws in SVG")) {
         console.log("ART_PROMPT=" + JSON.stringify(p.messages[1].content));
         return Response.json({choices:[{message:{content:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#7ab"/></svg>'},finish_reason:"stop"}]});
       }
@@ -92,6 +95,20 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   assert.match(svg, /^<svg/);
   assert.match(output, /ART_PROMPT=.*Palette: the image sits on a page with background \S+ and accent hsl\(/);
   assert.equal(output.match(/ART_PROMPT=/g).length, 1); // warmed and fetched as the same image
+  // Image results are drawn in the medium and shape they name; the grid tile
+  // keeps that shape.
+  const images = await (await fetch(`${base}/images?q=greenhouse`)).text();
+  assert.match(images, /src="\/img\/greenhouse%20frame%20side%20elevation\?s=blueprint&amp;a=tall"/);
+  assert.match(images, /style="aspect-ratio:280\/420"/);
+  const drawn = await fetch(`${base}/img/greenhouse%20frame%20side%20elevation?s=blueprint&a=tall`);
+  assert.match(drawn.headers.get("content-security-policy"), /default-src 'none'/);
+  assert.match(await drawn.text(), /^<svg/);
+  assert.match(output, /ART_PROMPT=.*Medium: blueprint/);
+  // An old-style bare /img URL still draws, in a style its description names.
+  const bare = await fetch(`${base}/img/pixel%20art%20of%20a%20greenhouse`);
+  assert.equal(bare.status, 200);
+  assert.match(await bare.text(), /^<svg/);
+  assert.match(output, /ART_PROMPT="Picture: pixel art of a greenhouse\\nMedium: pixel art\./);
   const cached = await (await fetch(url)).text();
   assert.match(cached, /Section 4/);
   assert.ok(!output.includes("SECTION_CALL=5"));

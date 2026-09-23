@@ -3,7 +3,8 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { streamText, completeText, generateImage, extractJSON, config, withPalette } from "./lib/llm.js";
+import { streamText, completeText, generateImage, extractJSON, config } from "./lib/llm.js";
+import { imageSpec, imageKey, imageQuery, SHAPES, NEWS_STYLES } from "./lib/images.js";
 import {
   mapsResultsPrompt, timelineResultsPrompt, searchShardPrompt, newsShardPrompt, imageShardPrompt, overviewPrompt,
   SEARCH_ANGLES, NEWS_ANGLES, IMAGE_ANGLES,
@@ -19,9 +20,9 @@ const CACHE_MAX = 200;
 const IMG_CACHE_MAX = 60;
 const pageCache = new Map(); // "/domain.tld/path" -> full HTML
 const serpCache = new Map(); // "<tab>:<query>" -> full HTML
-const imageCache = new Map(); // image prompt -> { mime, buf }
+const imageCache = new Map(); // imageKey(spec) -> { mime, buf }
 const inflight = new Map(); // page path -> live generation entry (chunks so far)
-const imageInflight = new Map(); // image prompt -> Promise<{mime, buf}>
+const imageInflight = new Map(); // imageKey(spec) -> Promise<{mime, buf}>
 const siteContext = new Map(); // domain -> { query, title } from first visit
 
 // Pages for the top results of a search start generating as soon as those
@@ -53,7 +54,9 @@ function webHref(query, { url, title, snippet, kind }) {
   return `${toWebPath(url)}?fq=${encodeURIComponent(query)}&ft=${encodeURIComponent(title ?? "")}&fs=${encodeURIComponent(snippet ?? "")}${kind ? `&fk=${encodeURIComponent(kind)}` : ""}`;
 }
 
-const imgSrc = (prompt) => `/img/${encodeURIComponent(String(prompt ?? "").slice(0, 600))}`;
+// A picture's medium and shape ride in its URL (see lib/images.js); without
+// them /img infers a style from the description.
+const imgSrc = (prompt, spec) => `/img/${encodeURIComponent(String(prompt ?? "").slice(0, 600))}${spec ? `?${imageQuery(spec)}` : ""}`;
 
 // Parse one streamed JSONL line. Tolerates array framing ("[", "],", trailing commas).
 function parseJSONLine(line) {
@@ -193,11 +196,12 @@ body { font-family: arial, sans-serif; color: #202124; }
 .nthumb { width: 112px; height: 112px; border-radius: 8px; object-fit: cover; background: #f1f3f4; flex-shrink: 0; }
 .nthumb, .tile img { opacity: 0; transition: opacity .5s; }
 .nthumb.ld, .tile img.ld { opacity: 1; }
-.grid { margin: 20px 20px 60px 182px; display: flex; flex-wrap: wrap; gap: 14px; max-width: 1100px; align-items: flex-start; }
-.tile { width: 210px; text-decoration: none; color: inherit; }
-.tile img { width: 210px; height: 158px; object-fit: cover; border-radius: 10px; background: #f1f3f4; display: block; }
-.tcap { font-size: 13px; margin-top: 5px; line-height: 1.3; }
-.tsite { font-size: 12px; color: #70757a; }
+.grid { margin: 20px 20px 60px 182px; display: flex; flex-wrap: wrap; gap: 18px 12px; max-width: 1180px; align-items: flex-start; }
+.grid::after { content: ""; flex: 1e4 1 0; }
+.tile { flex: 1.333 1 240px; min-width: 0; text-decoration: none; color: inherit; }
+.tile img { width: 100%; height: auto; aspect-ratio: 4/3; object-fit: cover; border-radius: 10px; background: #f1f3f4; display: block; }
+.tcap { font-size: 13px; margin-top: 5px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tsite { font-size: 12px; color: #70757a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .maps { margin: 20px 20px 60px 182px; display: flex; gap: 28px; align-items: flex-start; max-width: 1100px; }
 .places { flex: 1; max-width: 560px; }
 .place { display: flex; gap: 14px; padding: 16px 0; border-bottom: 1px solid #ebebeb; text-decoration: none; color: inherit; }
@@ -381,8 +385,9 @@ function relatedSearches(o) {
 function renderNewsItem(query, n) {
   const url = `https://${n.domain}${n.path?.startsWith("/") ? n.path : `/${n.path ?? ""}`}`;
   const href = webHref(query, { url, title: n.headline, snippet: n.snippet });
-  if (n.image) warmImage(n.image);
-  const thumb = n.image ? `<img class="nthumb" src="${esc(imgSrc(n.image))}" loading="lazy" onload="this.classList.add('ld')" alt="">` : "";
+  const pic = n.image && imageSpec(normalizeImagePrompt(n.image), { s: NEWS_STYLES.includes(n.style) ? n.style : "photo", a: "square" });
+  if (pic) warmImage(pic);
+  const thumb = pic ? `<img class="nthumb" src="${esc(imgSrc(n.image, pic))}" loading="lazy" onload="this.classList.add('ld')" alt="">` : "";
   return `<a class="ncard" href="${esc(href)}">
   <div><div class="nsrc">${esc(n.outlet)}</div><div class="nhead">${esc(n.headline)}</div><div class="nsnip">${esc(n.snippet)}</div><div class="nage">${esc(n.age ?? "")}</div></div>
   ${thumb}
@@ -390,12 +395,17 @@ function renderNewsItem(query, n) {
 `;
 }
 
+// Tiles keep their picture's aspect ratio and grow in proportion to it, so
+// each row of the grid is one height and fills the width, like Google Images.
+const TILE_HEIGHT = 180;
 function renderImageTile(query, t) {
-  warmImage(t.image);
+  const pic = imageSpec(normalizeImagePrompt(t.image), { s: t.style, a: t.shape });
+  warmImage(pic);
+  const [w, h] = SHAPES[pic.shape];
   const url = `https://${t.site}${t.path?.startsWith("/") ? t.path : `/${t.path ?? ""}`}`;
   const href = webHref(query, { url, title: t.caption });
-  return `<a class="tile" href="${esc(href)}">
-  <img src="${esc(imgSrc(t.image))}" loading="lazy" onload="this.classList.add('ld')" alt="${esc(t.caption)}">
+  return `<a class="tile" href="${esc(href)}" style="flex:${(w / h).toFixed(3)} 1 ${Math.round((TILE_HEIGHT * w) / h)}px">
+  <img src="${esc(imgSrc(t.image, pic))}" style="aspect-ratio:${w}/${h}" loading="lazy" onload="this.classList.add('ld')" alt="${esc(t.caption)}">
   <div class="tcap">${esc(t.caption)}</div><div class="tsite">${esc(t.site)}</div>
 </a>
 `;
@@ -443,8 +453,9 @@ function renderEvent(query, e) {
 // immediately rather than after the list finishes.
 const mapsHeader = (query) => {
   const prompt = `Top-down street map of the neighborhood for "${query}": a few streets and blocks, a park or river, and pins marked A to F`;
-  warmImage(prompt);
-  return `<div class="maps"><img class="map" src="${esc(imgSrc(prompt))}" onload="this.classList.add('ld')" alt="Map">`;
+  const pic = imageSpec(prompt, { s: "map", a: "landscape" });
+  warmImage(pic);
+  return `<div class="maps"><img class="map" src="${esc(imgSrc(prompt, pic))}" onload="this.classList.add('ld')" alt="Map">`;
 };
 
 const statsLine = (query, page) =>
@@ -707,36 +718,37 @@ function diskPutImage(prompt, img) {
     .catch((err) => console.warn(`[image] disk cache write failed:`, err.message));
 }
 
-function getImage(prompt) {
-  const cached = imageCache.get(prompt);
+function getImage(spec) {
+  const key = imageKey(spec);
+  const cached = imageCache.get(key);
   if (cached) return Promise.resolve(cached);
-  let task = imageInflight.get(prompt);
+  let task = imageInflight.get(key);
   if (!task) {
     task = (async () => {
-      const disk = await diskGetImage(prompt);
+      const disk = await diskGetImage(key);
       if (disk) {
-        cachePut(imageCache, prompt, disk, IMG_CACHE_MAX);
+        cachePut(imageCache, key, disk, IMG_CACHE_MAX);
         return disk;
       }
-      console.log(`[image] ${prompt.slice(0, 80)}`);
-      const img = await generateImage(prompt);
-      cachePut(imageCache, prompt, img, IMG_CACHE_MAX);
-      diskPutImage(prompt, img);
+      console.log(`[image] ${spec.style}/${spec.shape} ${spec.description.slice(0, 70)}`);
+      const img = await generateImage(spec);
+      cachePut(imageCache, key, img, IMG_CACHE_MAX);
+      diskPutImage(key, img);
       return img;
     })();
-    imageInflight.set(prompt, task);
+    imageInflight.set(key, task);
     // .finally() forks a new promise chain — give it its own catch or a
     // failed generation becomes an unhandled rejection and kills the process.
-    task.finally(() => imageInflight.delete(prompt)).catch(() => {});
+    task.finally(() => imageInflight.delete(key)).catch(() => {});
   }
   return task;
 }
 
 // Start generating before the browser ever requests the image. `query` is
-// the src's ?bg=&fg=, so the warmed image is the one the browser will ask for.
-const warmImage = (rawPrompt, query = {}) => {
-  const prompt = drawnPrompt(normalizeImagePrompt(rawPrompt), query);
-  if (prompt && config.apiKey) getImage(prompt).catch(() => {});
+// built from the same description and query as the src, so the warmed image
+// is the one the browser will ask for.
+const warmImage = (spec) => {
+  if (spec.description && config.apiKey) getImage(spec).catch(() => {});
 };
 
 function placeholderSVG(prompt) {
@@ -744,18 +756,17 @@ function placeholderSVG(prompt) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},45%,82%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360},40%,68%)"/></linearGradient></defs><rect width="800" height="600" fill="url(#g)"/></svg>`;
 }
 
-// ?bg=&fg= carry a generated site's palette, which the picture is drawn with.
-const CSS_COLOR = /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d.,% ]+\))$/i;
-const drawnPrompt = (prompt, { bg, fg }) =>
-  prompt && CSS_COLOR.test(bg ?? "") && CSS_COLOR.test(fg ?? "") ? withPalette(prompt, { bg, fg }) : prompt;
-
+// ?s=&a= pick the picture's medium and shape; ?bg=&fg= carry a generated
+// site's palette, which the picture is drawn with.
 app.use("/img", async (req, res) => {
   if (req.method !== "GET") return res.status(405).end();
   const prompt = normalizeImagePrompt(req.query.p ?? req.path.replace(/^\/+/, ""));
   if (!prompt || !config.apiKey) return res.status(404).end();
+  // Opened directly, an SVG is a document: nothing in it may run or load.
+  res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
 
   try {
-    const img = await getImage(drawnPrompt(prompt, req.query));
+    const img = await getImage(imageSpec(prompt, req.query));
     res.setHeader("Content-Type", img.mime);
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.send(img.buf);
@@ -806,7 +817,7 @@ function startPageGeneration(webPath, promptArgs) {
       for (const [src, p, q = ""] of acc.matchAll(/\/img\/([^"'\s<>)?]+)(?:(\?[^"'\s<>]*)(?=["'\s<>])|(?=["'\s<>)]))/g)) {
         if (!seenImgs.has(src)) {
           seenImgs.add(src);
-          warmImage(p, Object.fromEntries(new URLSearchParams(q.replaceAll("&amp;", "&"))));
+          warmImage(imageSpec(normalizeImagePrompt(p), Object.fromEntries(new URLSearchParams(q.replaceAll("&amp;", "&")))));
         }
       }
     };
