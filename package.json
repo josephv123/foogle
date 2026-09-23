@@ -6,7 +6,6 @@
   "main": "server.js",
   "scripts": {
     "start": "node scripts/start.js",
-    "bench": "node scripts/benchmark.js",
     "test": "node --test"
   },
   "license": "MIT",
