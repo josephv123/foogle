@@ -52,6 +52,7 @@ const addToCart = [{ click: "[data-add-to-cart]" }, { wait: ".fw-toast" }, { cli
 // browser around it instead (its tabs and address bar).
 const PAGES = [
   { name: "home", path: "/" },
+  { name: "doodles", path: "/doodles" },
   { name: "search", path: "/search?q=storm%20lanterns" },
   { name: "images", path: "/images?q=storm%20lanterns" },
   { name: "news", path: "/news?q=harbor%20festival" },
