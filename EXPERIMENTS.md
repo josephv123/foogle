@@ -187,7 +187,7 @@ Luna on Azure is the same model at the same price, twice as fast. Over 48 more r
 What changed:
 
 - **Routing.** Pictures and the Images result shards ask OpenRouter for the fastest provider (`FAST_ROUTE` in `lib/llm.js`), leaving out OpenAI's flex tier (cheaper, but can queue for many seconds) and fast tier (double the price, no faster).
-- **Pictures stream and paint in.** An `<img>` asking for a picture still being drawn gets `multipart/x-mixed-replace`: a sketch of its colours right away, a sanitized draft of the SVG so far (complete tags, open elements closed) up to four times a second, then the picture. Chrome, Firefox and Safari all repaint an `<img>` for each part, as long as the boundary follows each part rather than leading the next (otherwise every part shows one part late). Defs come first (13-43% of the text), then the backdrop, so a real picture starts appearing ~2s after its line.
+- **Pictures stream and paint in** (since replaced by a crossfade from the sketch; see the follow-up below). An `<img>` asking for a picture still being drawn gets `multipart/x-mixed-replace`: a sketch of its colours right away, a sanitized draft of the SVG so far (complete tags, open elements closed) up to four times a second, then the picture. Chrome, Firefox and Safari all repaint an `<img>` for each part, as long as the boundary follows each part rather than leading the next (otherwise every part shows one part late). Defs come first (13-43% of the text), then the backdrop, so a real picture starts appearing ~2s after its line.
 - **Sketches in the page.** Image, News and Maps results carry the same sketch as a CSS background, so a tile has colour the moment its line lands, even before a browser connection frees up for its picture (plain HTTP/1.1 allows 6 per host; the Render deployment speaks HTTP/2).
 - **Queue.** 24 pictures at once instead of 12, and a picture someone is waiting for goes ahead of one for a prefetched page.
 - **Repair.** Drafts and finished pictures are rebuilt with balanced tags, so a picture with one mismatched closer (`<path …>SAME ROCK,</text>`, 1 of 205 in these runs) draws instead of rendering blank. The 204 well-formed ones come through byte for byte.
@@ -202,6 +202,21 @@ What changed:
 | News page (8 thumbnails): first on screen / all finished | 8.8s / 14.4s | 1.7s sketch, 3.3s drawing / 9.6s |
 
 The cost is unchanged: ~$0.0061 per Images page (12 pictures ~$0.0055, shards ~$0.0006). What's left is the odd slow stream: the 11th of 12 pictures finished at 7.7-8.8s, and one slower picture set the "all finished" time.
+
+### Follow-up: from the sketch straight to the picture
+
+Watching pictures assemble one shape at a time looked unfinished, so the drafts went. `/img` now sends only the finished picture, as a plain SVG with no multipart. Until it arrives, its `<img>` shows the sketch as a CSS background: the Images, News and Maps results as before, and now also the hero art and section pictures of generated sites (`sketchFor` in `lib/images.js`, merged under any style the model gave the `<img>`). The picture then fades in over its sketch in 0.35s. The fade is a CSS animation inside the served SVG (`fadeIn`), because a fade on the `<img>` element would fade its background sketch with it. Chromium, Firefox and WebKit all run it from a first frame at opacity 0, so nothing flashes, and it needs no script: the theme's `onload` handlers went too, and the `/web` CSP's `script-src` is now just `'self'`. Chromium runs an SVG image's animations only while the image is painted, so a picture that finished further down the page fades in as it's scrolled to. `npm run shots` shows finished pictures without the fade.
+
+Measured 2026-09-23 on cold Images pages in Chromium at 1280×800, with the same routing, queue and prompts as above:
+
+| Cold Images page, 12 pictures | This change |
+|---|---:|
+| First sketch on screen | 1.3-1.6s |
+| First picture finished | 5.4-5.9s |
+| All pictures finished | 9.7-10.9s |
+| Per picture, line to finished: median / p90 (36 pictures) | 4.9s / 6.2s |
+
+Each picture reached the screen within 0.1s of the server finishing it, so sending it whole costs nothing: the time is all drawing. An hour later the providers were slower for everyone, and five alternating pairs of cold pages against the previous code (the multipart stream) drew at the same speed: the median picture took 7.1-9.2s there and 7.6-8.0s here, and neither side was ahead once the order was swapped.
 
 ## Live references
 

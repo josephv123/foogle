@@ -4,6 +4,7 @@ import { planFromAnswers, jevPlan, titleFromURL, defaultPlan } from "../lib/jev.
 import { STYLE_KEYS } from "../lib/styles.js";
 import { blockEnd, generatePage, cleanSection, cleanFactLine, paintPictures, salvageSection } from "../lib/pages.js";
 import { TruncatedError, DroppedError } from "../lib/llm.js";
+import { sketchFor } from "../lib/images.js";
 
 const args = { url: "https://garden.example/repairs", title: "Gardeners", snippet: "Repairs for greenhouses" };
 const plan = planFromAnswers(args, { kind: { choice: "forum" }, style: { choice: "phpbb" } });
@@ -161,9 +162,19 @@ test("a failed fact sheet never blocks the page", async () => {
   assert.equal(cleanFactLine("```"), null);
 });
 
-test("section pictures get the site palette and medium, and a half-written picture src is never streamed", async () => {
-  assert.match(paintPictures('<img class="pic" src="/img/brass%20lamp" alt="">', plan), /src="\/img\/brass%20lamp\?s=\w+&amp;a=landscape&amp;bg=[^&"]+&amp;fg=[^&"]+"/);
+test("section pictures get the site palette, medium and sketch, and a half-written picture is never streamed", async () => {
+  assert.match(paintPictures('<img class="pic" src="/img/brass%20lamp" alt="">', plan), /src="\/img\/brass%20lamp\?s=\w+&amp;a=landscape&amp;bg=[^&"]+&amp;fg=[^&"]+" style="background:radial-gradient\([^"]*\)" alt="">$/);
   assert.match(paintPictures('<img src="/img/brass lamp">', plan), /src="\/img\/brass%20lamp\?/);
+  // The sketch is the one /img will draw for the src, and goes under the
+  // model's own style, so a background the model chose wins.
+  const src = paintPictures('<img src="/img/brass%20lamp">', plan).match(/src="\/img\/brass%20lamp\?([^"]*)"/)[1].replaceAll("&amp;", "&");
+  const sketch = sketchFor("brass lamp", src);
+  assert.match(paintPictures('<img style="width:50%" class="pic" src="/img/brass%20lamp">', plan), new RegExp(`^<img style="background:${sketch.replace(/[()]/g, "\\$&")};width:50%" class="pic" src=`));
+  assert.match(paintPictures(`<img src="/img/x" style='border:0'>`, plan), /style='background:radial-gradient\([^']*\);border:0'>$/);
+  assert.match(paintPictures('<img src="/img/x?s=blueprint&amp;a=tall">', plan), /^<img src="\/img\/x\?s=blueprint&amp;a=tall" style="background:[^"]*linear-gradient\(#1f4f8f, #163a6a\)">$/);
+  // Never a second style attribute, and nothing for pictures from elsewhere.
+  assert.equal(paintPictures('<img src="/img/x?s=photo" style=width:9px>', plan), '<img src="/img/x?s=photo" style=width:9px>');
+  assert.equal(paintPictures('<img src="/fw/logo.svg" alt="">', plan), '<img src="/fw/logo.svg" alt="">');
   let push;
   const stream = () => (async function* () { for (;;) { const t = await new Promise(r => { push = r; }); if (t === null) return; yield t; } })();
   const gen = generatePage(args, { looks: new Map(), facts: noFacts, planWithJev: async () => ({ ...plan, secs: plan.secs.slice(0, 1) }), stream });
@@ -174,10 +185,12 @@ test("section pictures get the site palette and medium, and a half-written pictu
   assert.equal((await first).value, '<section><h2>Lamps</h2>'); // whole blocks only: the picture waits
   const rest = gen.next();
   await new Promise(resolve => setImmediate(resolve));
-  push('%20lamp" alt=""></section>');
+  push('%20lamp" alt="lamp');
+  await new Promise(resolve => setImmediate(resolve));
+  push('"></section>');
   await new Promise(resolve => setImmediate(resolve));
   push(null);
-  assert.match((await rest).value, /^<img class="pic" src="\/img\/brass%20lamp\?s=\w+&amp;a=landscape&amp;bg=/);
+  assert.match((await rest).value, /^<img class="pic" src="\/img\/brass%20lamp\?s=\w+&amp;a=landscape&amp;bg=[^"]*" style="background:radial-gradient\([^"]*\)" alt="lamp">/);
 });
 
 test("the hero's invented counts defer to ones the page already states", async () => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { STYLES, SHAPES, imageSpec, sketchSVG, sketchCSS } from "../lib/images.js";
+import { STYLES, SHAPES, imageSpec, sketchCSS, sketchFor, fadeIn } from "../lib/images.js";
 
 // One stub for the whole file: the OpenAI client is made once per process.
 // A request for a held description waits for release().
@@ -52,31 +52,38 @@ test("a draft is the picture so far: complete tags only, open elements closed, s
   assert.equal(draftSVG('<svg viewBox="0 0 4 3"></g><g><rect width="4" height="3"></g></svg>'), '<svg viewBox="0 0 4 3"><g><rect width="4" height="3"></rect></g></svg>');
 });
 
-test("a picture's sketch is an SVG of its shape in the colours it will be drawn in", () => {
+test("a picture's sketch is a CSS background in the colours it will be drawn in", () => {
   for (const style of Object.keys(STYLES)) {
     for (const shape of Object.keys(SHAPES)) {
-      const svg = sketchSVG(imageSpec("a harbour at dawn", { s: style, a: shape }));
-      assert.match(svg, new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SHAPES[shape].join(" ")}">`));
-      assert.doesNotMatch(svg, /undefined|null|NaN/, `${style}/${shape}`);
+      const css = sketchCSS(imageSpec("a harbour at dawn", { s: style, a: shape }));
+      assert.match(css, /^radial-gradient\(45% 40% at \d+% \d+%, color-mix\(in srgb, \S+ 60%, transparent\), transparent\), radial-gradient\(35% 35% at \d+% \d+%, color-mix\(in srgb, \S+ 50%, transparent\), transparent\), linear-gradient\(\S+, \S+\)$/, `${style}/${shape}`);
+      assert.doesNotMatch(css, /undefined|null|NaN/, `${style}/${shape}`);
     }
   }
   // A site's pictures start in its palette; a blueprint stays blue anywhere.
-  assert.match(sketchSVG(imageSpec("a harbour", { s: "flat", bg: "#101418", fg: "#ff3366" })), /stop-color="#101418"[\s\S]*stop-color="#ff3366"/);
-  assert.doesNotMatch(sketchSVG(imageSpec("a harbour", { s: "blueprint", bg: "#101418", fg: "#ff3366" })), /#ff3366/);
-  // Different pictures, different sketches.
-  assert.notEqual(sketchSVG(imageSpec("a harbour", { s: "photo" })), sketchSVG(imageSpec("a bakery", { s: "photo" })));
-  // A search result shows the same sketch in CSS before its picture is asked for.
-  const css = sketchCSS(imageSpec("a harbour", { s: "blueprint" }));
-  assert.match(css, /^radial-gradient\(45% 40% at \d+% \d+%, color-mix\(in srgb, #3b73b6 60%, transparent\), transparent\), radial-gradient\([^;"]*\), linear-gradient\(#1f4f8f, #163a6a\)$/);
+  assert.match(sketchCSS(imageSpec("a harbour", { s: "flat", bg: "#101418", fg: "#ff3366" })), /#ff3366[\s\S]*linear-gradient\(#101418, #101418\)$/);
+  assert.doesNotMatch(sketchCSS(imageSpec("a harbour", { s: "blueprint", bg: "#101418", fg: "#ff3366" })), /#ff3366/);
+  assert.match(sketchCSS(imageSpec("a harbour", { s: "blueprint" })), /color-mix\(in srgb, #3b73b6 60%, transparent\)[\s\S]*linear-gradient\(#1f4f8f, #163a6a\)$/);
   assert.match(sketchCSS(imageSpec("a harbour", { s: "flat", bg: "hsl(20, 50%, 40%)", fg: "#ff3366" })), /linear-gradient\(hsl\(20, 50%, 40%\), hsl\(20, 50%, 40%\)\)$/);
+  // Different pictures, different sketches.
+  assert.notEqual(sketchCSS(imageSpec("a harbour", { s: "photo" })), sketchCSS(imageSpec("a bakery", { s: "photo" })));
+  // A page that builds its own /img src gets the sketch /img would draw for it;
+  // colours that aren't colours never reach the CSS.
+  assert.equal(sketchFor(" a harbour ", "s=flat&a=wide&bg=%23101418&fg=%23ff3366"), sketchCSS(imageSpec("a harbour", { s: "flat", a: "wide", bg: "#101418", fg: "#ff3366" })));
+  assert.doesNotMatch(sketchFor("a harbour", 's=flat&bg=red;}"&fg=url(x)'), /red|url|"/);
+});
+
+test("a picture fades in over its sketch, from its first frame", () => {
+  const faded = fadeIn(SVG);
+  assert.equal(faded, SVG.replace('viewBox="0 0 400 300">', 'viewBox="0 0 400 300"><style>:root{animation:foogle-in .35s ease-out both}@keyframes foogle-in{from{opacity:0}}</style>'));
+  // A ">" in a quoted attribute of the <svg> tag doesn't end it.
+  assert.match(fadeIn('<svg aria-label="a>b" viewBox="0 0 4 3"><rect/></svg>'), /^<svg aria-label="a>b" viewBox="0 0 4 3"><style>/);
 });
 
 test("pictures stream from the fastest provider, and one cut off at the token limit is kept", async () => {
-  const texts = [];
-  const img = await generateImage(imageSpec("a lighthouse", { s: "photo" }), { onText: (t) => texts.push(t) });
+  const img = await generateImage(imageSpec("a lighthouse", { s: "photo" }));
   assert.equal(img.mime, "image/svg+xml");
   assert.equal(String(img.buf), sanitizeSVG(SVG));
-  assert.ok(texts.length > 3 && texts.at(-1) === SVG, "onText sees the text grow");
   const call = calls.find((c) => c.desc === "a lighthouse");
   assert.equal(call.stream, true);
   assert.deepEqual(call.provider, FAST_ROUTE);

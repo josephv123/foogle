@@ -81,6 +81,10 @@ test("every structure renders every page type completely, with any spec, safely"
       assert.equal(css.split("{").length, css.split("}").length, `unbalanced braces: ${arch}/${page}`);
       assert.match(out, /<header class="site d-head">/);
       assert.match(out, /<footer class="site d-foot">/);
+      // Its pictures show their sketch until they fade in; no inline handler
+      // (the page CSP allows none).
+      for (const [img] of out.matchAll(/<img [^>]*src="\/img\/[^>]*>/g)) assert.match(img, /" style="background:radial-gradient\([^"]*\)" alt="">$/, `${arch}/${page}`);
+      assert.doesNotMatch(out, /\son\w+="/, `${arch}/${page}`);
       assert.equal(plan.secs.length, 4);
       assert.ok(heroFacts(plan).every((f) => !/undefined/.test(f)));
       const art = new URLSearchParams(artColors(plan));
