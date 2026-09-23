@@ -12,6 +12,7 @@ Verify with a fake model first, and use a real one only when you have to.
 
 - **Layout, UI or interactivity changes.** This covers the theme and styles, widgets, the results pages, routes and forms. Run `npm test`, then `npm run shots`. The shots run uses the fake model (`FOOGLE_FAKE_LLM`), so it is free and takes about 15 seconds. Look at `.shots/contact.png`, then the full PNGs for the pages you touched. Read the warnings it prints (page errors, console errors, horizontal overflow, intercepted clicks). Narrow a run with `--only "store|cart"`.
 - **Interactive flows.** Don't drive a browser click by click to check one. Add the flow as scripted `steps` on a page in `PAGES` in `scripts/shots.js` (click, fill, select, check, press, wait, url), the way the cart and checkout pages do.
+- **Ad-hoc browser checks.** When shots don't cover it, use the `agent-browser` CLI (see the crew rules). Generated pages keep streaming for several seconds after a click, so run `agent-browser wait --load load` before judging or screenshotting. Reach pages by clicking links, never by typing guessed URLs: every new URL costs a live generation.
 - **Changes to what the model writes** (prompts, briefs, hints, image briefs). Only these need the live model, and even then keep it to a handful of pages: `npm run shots -- --live --only "forum|wiki"`. To iterate on the same pages repeatedly, record them once and replay them for free:
   1. Record: `FOOGLE_LLM_CACHE=record npm start -- --port 0`
   2. Replay: `FOOGLE_LLM_CACHE=replay npm start -- --port 0`
