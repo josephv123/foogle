@@ -102,6 +102,20 @@ test("the daily budget stops new generations until midnight UTC", () => {
   assert.equal(limits.status().spentUsd, 0);
 });
 
+test("background work (the daily doodle) asks the day's budget and is counted in it", () => {
+  const now = clock(Date.UTC(2026, 8, 23, 22, 30));
+  const limits = createLimits({ env: { DAILY_BUDGET_USD: "0.01" }, now });
+  assert.ok(limits.withinBudget());
+  limits.record({ cost: 0.004 }); // the doodle's two calls report their cost like any other
+  assert.ok(limits.withinBudget());
+  limits.record({ cost: 0.007 });
+  assert.equal(limits.withinBudget(), false);
+  now.t = Date.UTC(2026, 8, 24, 0, 0, 1);
+  assert.ok(limits.withinBudget());
+  assert.equal(createLimits({ env: { DAILY_BUDGET_USD: "0" }, now }).withinBudget(), false);
+  assert.ok(createLimits({ env: { DAILY_BUDGET_USD: "off" }, now }).withinBudget());
+});
+
 test("limits are configurable and can be switched off", () => {
   const off = createLimits({ env: { RATE_LIMIT_USD_PER_HOUR: "off", DAILY_BUDGET_USD: "off" }, now: clock() });
   for (let i = 0; i < 1000; i++) assert.ok(off.allow(req("203.0.113.5"), res(), "search"));

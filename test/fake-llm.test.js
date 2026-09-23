@@ -17,6 +17,7 @@ import { sanitizeSVG } from "../lib/llm.js";
 import { questions, planFromAnswers } from "../lib/jev.js";
 import { generatePage, cleanFactLine } from "../lib/pages.js";
 import { replyWriter } from "../lib/interact.js";
+import { occasionPrompt, parseOccasion, scenePrompt, composeDoodle, balanced } from "../lib/doodle.js";
 import { sanitizeSection } from "../lib/widgets.js";
 
 const reply = ({ system, user }) => fakeReply(system, user);
@@ -77,6 +78,22 @@ test("canned pictures are well-formed SVG on the requested canvas, in every medi
     drawings.add(svg.replace(/\d+/g, ""));
   }
   assert.ok(drawings.size >= 8, "media are drawn differently");
+});
+
+test("the doodle's prompts get a canned occasion and a scene drawn around the letters", () => {
+  const titles = new Set();
+  for (const date of ["2026-09-23", "2026-09-24", "2026-09-25", "2026-09-26"]) {
+    const ask = occasionPrompt(date);
+    const occasion = parseOccasion(reply(ask), ask.media);
+    assert.ok(occasion.title && occasion.blurb && occasion.query, JSON.stringify(occasion));
+    assert.ok(ask.media.includes(occasion.medium));
+    titles.add(occasion.title);
+    const scene = reply(scenePrompt(occasion));
+    assert.match(scene, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 600 240">[\s\S]*<g id="front">[\s\S]*<\/svg>$/);
+    assert.equal(sanitizeSVG(scene), scene);
+    assert.ok(balanced(composeDoodle(scene, occasion)));
+  }
+  assert.ok(titles.size >= 2, "days differ");
 });
 
 // A page's classes must come from the vocabulary the section writers are given.
@@ -241,6 +258,12 @@ test("FOOGLE_FAKE_LLM serves the whole site with no key and no network", async t
     comments = (await (await fetch(`${base}/fw/comments?page=${encodeURIComponent(page)}`)).json()).comments;
   }
   assert.equal(comments.filter(c => c.bot).length, 1);
+
+  // Today's doodle was drawn at startup and has taken the logo's place.
+  const home = await get("/");
+  assert.match(home, /<a class="doodle" href="\/search\?q=[^"]+" title="[^"]+"><img src="(\/doodle\/\d{4}-\d\d-\d\d\.svg\?v=\w+)"/);
+  assert.match(await get(home.match(/src="(\/doodle\/[^"]+)"/)[1]), /^<svg xmlns/);
+  assert.match(await get("/doodles"), /<a class="card" href="\/search\?q=/);
 
   assert.doesNotMatch(output, /NETWORK|\[jev\]/, "no network calls, and Jev (faked) planned every page");
   assert.match(output, /model: {4}foogle\/fake-llm/);
