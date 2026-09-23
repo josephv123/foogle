@@ -4,6 +4,7 @@ import { STYLES, STYLE_KEYS, KIND_STYLES, SECTION_LAYOUTS, pickStyle, defaultSty
 import { FONTS, normalizePlan, themeCSS, themeHeader, themeFooter, artColors, siteStyle } from "../lib/theme.js";
 import { planFromAnswers, defaultPlan } from "../lib/jev.js";
 import { pageSectionPrompt } from "../lib/prompts.js";
+import { STYLES as MEDIA, siteImageStyle } from "../lib/images.js";
 
 const KINDS = Object.keys(KIND_STYLES);
 const sites = Array.from({ length: 60 }, (_, i) => `site${i}.example`);
@@ -104,4 +105,39 @@ test("low-budget styles skip the hero picture", () => {
   const plan = normalizePlan({ kind: "gov", style: "civic", site: "permits.example", title: "Dog licenses" });
   assert.doesNotMatch(themeHeader(plan, "permits.example", { art: true }), /class="art"/);
   assert.match(themeHeader({ ...plan, style: "saas" }, "permits.example", { art: true }), /class="art"/);
+});
+
+test("pictures are drawn in a medium that suits the style", () => {
+  for (const [key, s] of Object.entries(STYLES)) for (const m of s.media ?? []) assert.ok(MEDIA[m], `${key} uses unknown medium ${m}`);
+  for (const style of STYLE_KEYS) {
+    for (const kind of KINDS) {
+      for (const site of sites.slice(0, 6)) {
+        const plan = normalizePlan({ kind, style, site });
+        const medium = new URLSearchParams(artColors(plan)).get("s");
+        const media = STYLES[style].media;
+        assert.ok(!media || media.includes(medium), `${style}/${kind}: ${medium}`);
+        // The kind's own suggestion wins whenever the style allows it.
+        if (!media || media.includes(siteImageStyle(plan))) assert.equal(medium, siteImageStyle(plan));
+      }
+    }
+  }
+});
+
+test("hero pictures are wide in wide heroes, and their URL survives apostrophes and parentheses", () => {
+  const hero = (style, site) => {
+    const plan = normalizePlan({ kind: "blog", style, site, title: "Grandma's (cast iron) skillet!" });
+    return { st: siteStyle(plan), src: themeHeader(plan, site, { art: true }).match(/<img class="art" src="([^"]*)"/)[1].replaceAll("&amp;", "&") };
+  };
+  const seen = new Set();
+  for (const site of sites) {
+    for (const style of ["editorial", "luxury", "swiss", "saas", "scrapbook"]) {
+      const { st, src } = hero(style, site);
+      assert.match(src, new RegExp(`[?&]a=${["center", "poster"].includes(st.hero) ? "wide" : "landscape"}&`));
+      seen.add(st.hero);
+      // The server's image scanner ends a src at ' or ); neither may appear.
+      assert.doesNotMatch(src.split("?")[0], /['()!*]/);
+      assert.equal(decodeURIComponent(src.split("?")[0].slice(5)).startsWith("Grandma's (cast iron) skillet!"), true);
+    }
+  }
+  assert.ok(seen.has("poster") && seen.has("center") && seen.has("split"));
 });
