@@ -682,9 +682,11 @@ function normalizeImagePrompt(raw) {
 }
 
 // Disk cache: images are the most expensive asset, so they persist across
-// restarts (unlike pages, which are cheap-ish and fun to regenerate).
+// restarts (unlike pages, which are cheap-ish and fun to regenerate). On hosts
+// with an ephemeral or read-only filesystem (e.g. Render's free tier) it just
+// starts empty or stays unused; reads and writes below already fail softly.
 const IMG_DIR = process.env.FOOGLE_IMAGE_CACHE || path.join(__dirname, ".foogle-cache", "images");
-await fs.mkdir(IMG_DIR, { recursive: true });
+await fs.mkdir(IMG_DIR, { recursive: true }).catch((err) => console.warn(`[image] disk cache unavailable:`, err.message));
 
 const imgFile = (prompt) =>
   path.join(IMG_DIR, createHash("sha1").update(`svg|${config.model}|${prompt}`).digest("hex"));

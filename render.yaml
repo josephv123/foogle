@@ -1,0 +1,29 @@
+# Render Blueprint: one free web service. In the dashboard, New > Blueprint,
+# pick this repo and paste the two secrets when prompted (see README "Deploy").
+services:
+  - type: web
+    name: foogle
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm ci
+    startCommand: npm start
+    # The homepage is a static file (public/index.html); it never calls an LLM.
+    healthCheckPath: /
+    autoDeployTrigger: commit
+    envVars:
+      # Pin the major version CI tests; package.json engines alone would
+      # resolve ">=20.12" to the newest Node release.
+      - key: NODE_VERSION
+        value: "22"
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: TYPESAFE_API_KEY
+        sync: false
+      # Render terminates TLS at a proxy, so trust one hop of X-Forwarded-For
+      # to get each visitor's real IP for rate limiting.
+      - key: TRUST_PROXY
+        value: "1"
+      # Stop spending on AI calls for the day once this many dollars are used.
+      - key: DAILY_BUDGET_USD
+        value: "1"
