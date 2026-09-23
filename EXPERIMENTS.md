@@ -1,5 +1,7 @@
 # Foogle model experiments — 2026-09-22
 
+> Since these runs Foogle has been reduced to the winners — GPT-6 Luna, Jev layouts and SVG pictures. The presets, the `single`/`planned` page modes, local providers, other image modes and the benchmark script were removed; they are in git history (`7e5c8f6`).
+
 GPT-6 Luna + Jev is the strongest price/speed candidate in this small screening run. It completed the test page in 5.25 seconds with a $0.0006169 OpenRouter charge. Gemini + Jev was similarly fast (5.46 seconds), at $0.00446025. Free Laguna produced a useful complete page but its search request was rate-limited. The launcher now defaults to Luna + Jev.
 
 ## What was built
@@ -79,6 +81,21 @@ npm test
 One prompt and one run per model/mode; models were not sampled in randomized order. Some model suites ran concurrently (at most three); sections ran concurrently within a page. The first serial suite was interrupted during an in-flight MiMo Pro request and resumed without repeating recorded trials. Any charge for that interrupted request is outside the recorded cost totals. Provider load, routing, caches and mandatory reasoning can affect these numbers. Image generation and browser paint time are excluded. Structural checks do not measure aesthetic quality or factual correctness.
 
 Fixed benchmark controls: 6,000 full-page output tokens, 1,200 per section, three sections; temperature requested at 1 for results and 0.7 for pages. Providers may ignore unsupported sampling controls. Reasoning is requested off with compatibility fallbacks; Gemini required low reasoning. This compares usable endpoint behavior, not identical internal computation.
+
+## Images: ASCII vs colored ASCII vs pixel art vs SVG
+
+Same six prompts (a hero, four subjects, the Maps-tab map) through GPT-6 Luna, one call per image. Script and galleries: `.foogle-bench/image-lab/`.
+
+| Technique | Median | Output tokens | $/image | Result |
+|---|---:|---:|---:|---|
+| ASCII (old default) | 3.2s | ~240 | $0.00013 | Subjects often unreadable |
+| ASCII, colored by glyph density | 3.2s | same | same | Barely helps; the drawing is the weak part |
+| ASCII + inline color tags / color mask | 4.5s | — | — | Slightly nicer, still crude; masks drift out of alignment |
+| 32×24 pixel art | 4.0s | — | — | Colorful, but small subjects unreadable; row widths drift |
+| SVG, old brief (800×600, 15-40 elements) | 11s | ~1150 | $0.00060 | Best quality |
+| SVG, lean brief (400×300, 10-25 elements) | 6.2s | ~660 | $0.00035 | Near-identical quality at half the time |
+
+Hosted presets now draw lean SVGs (`--images ascii` restores the old art). On generated sites the site's `bg`/`fg` go into the prompt, so pictures are drawn in the page's palette and use its background as their backdrop; tested on neon, paper and light palettes. Single-letter `<text>` is allowed so map pins keep their A–F labels.
 
 ## Live references
 
