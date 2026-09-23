@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { displayURL, omniboxTarget, tabTitle, browserBar } from "../lib/browserbar.js";
+import { displayURL, omniboxTarget, tabTitle, isHome, primaryRows, siteSuggestions, browserShell } from "../lib/browserbar.js";
+import { recentRows, rememberSearch } from "../public/fw/browsing.js";
 
 test("the bar shows a fake site's own URL, not Foogle's /web/ path", () => {
   const cases = [
@@ -23,6 +24,8 @@ test("the bar shows a fake site's own URL, not Foogle's /web/ path", () => {
     ["/search?q=starter+smells&page=2", "https://www.foogle.com/search?q=starter+smells&page=2"],
     ["/images?q=caf%C3%A9", "https://www.foogle.com/images?q=café"],
     ["/timelines?q=moon", "https://www.foogle.com/timelines?q=moon"],
+    // An in-page anchor stays on the end, even after Foogle's context.
+    ["/web/shop.example/faq?fq=x#returns", "https://shop.example/faq#returns"],
   ];
   for (const [path, url] of cases) assert.equal(displayURL(path), url, path);
 });
@@ -83,26 +86,67 @@ test("the tab reads like a browser's until the page's title arrives", () => {
   assert.equal(tabTitle("/"), "Foogle");
 });
 
-test("the bar is drawn in a page's first bytes, safe under the pages' CSP, and can be turned off", (t) => {
+test("suggestions: the first row is what Enter does; a URL goes there, anything else searches", () => {
+  const rows = (text) => primaryRows(text).map((r) => [r.kind, r.label, r.target]);
+  assert.deepEqual(rows("cnn"), [["search", 'Search Foogle for "cnn"', "/search?q=cnn"]]);
+  assert.deepEqual(rows("foo.bar baz"), [["search", 'Search Foogle for "foo.bar baz"', "/search?q=foo.bar+baz"]]);
+  assert.deepEqual(rows("cnn.com  "), [["url", "cnn.com", "/web/cnn.com"], ["search", 'Search Foogle for "cnn.com"', "/search?q=cnn.com"]]);
+  assert.deepEqual(rows("https://x.com/y")[0], ["url", "x.com/y", "/web/x.com/y"]);
+  assert.deepEqual(rows("en.wikipedia.org/wiki/Foo")[0], ["url", "en.wikipedia.org/wiki/Foo", "/web/en.wikipedia.org/wiki/Foo"]);
+  assert.deepEqual(rows("localhost:3000")[0], ["url", "localhost:3000", "/web/localhost:3000"]);
+  assert.deepEqual(rows("10.0.0.7/admin")[0], ["url", "10.0.0.7/admin", "/web/10.0.0.7/admin"]);
+  assert.deepEqual(rows("   "), []);
+});
+
+test("known sites (lib/brands.js) the text names are offered, by brands' own rules", () => {
+  const sites = (text) => siteSuggestions(text).map((r) => [r.label, r.detail, r.target]);
+  assert.deepEqual(sites("cnn"), [["cnn.com", "CNN", "/web/www.cnn.com"]]);
+  assert.deepEqual(sites("Apple"), [["apple.com", "Apple", "/web/www.apple.com"]]);
+  assert.deepEqual(sites("reddit sourdough"), [["reddit.com/r/sourdough", "Reddit", "/web/www.reddit.com/r/sourdough/"]]);
+  // As the name is typed…
+  assert.deepEqual(sites("red"), [["reddit.com", "Reddit", "/web/www.reddit.com"]]);
+  // …but not while it could still be an everyday word, or when it is one in a search.
+  assert.deepEqual(sites("app"), []);
+  assert.deepEqual(sites("apple pie"), []);
+  // A URL goes where it says.
+  assert.deepEqual(sites("cnn.com"), []);
+  assert.equal(siteSuggestions("netf")[0].fill, "netflix.com");
+});
+
+test("recent searches (foogle.recent, newest first) match what is typed; omnibox searches join them", () => {
+  const recent = ["sourdough starter smells", "Sourdough discard crackers", "moon base jobs", 42, ""];
+  assert.deepEqual(recentRows("sour", recent).map((r) => [r.kind, r.label, r.target]), [
+    ["recent", "sourdough starter smells", "/search?q=sourdough+starter+smells"],
+    ["recent", "Sourdough discard crackers", "/search?q=Sourdough+discard+crackers"],
+  ]);
+  assert.deepEqual(recentRows("  ", recent), []);
+  assert.deepEqual(recentRows("x", null), []);
+  assert.deepEqual(rememberSearch(["a", "Moon base jobs", "b"], " moon base jobs "), ["moon base jobs", "a", "b"]);
+  assert.equal(rememberSearch(Array.from({ length: 30 }, (_, i) => `q${i}`), "new").length, 20);
+});
+
+test("the homepage is the new-tab page: an empty address bar with a placeholder", () => {
+  assert.ok(isHome("/"));
+  assert.ok(!isHome("/search?q=x") && !isHome("/?q=x") && !isHome("/web/x.example"));
+  const home = browserShell({ originalUrl: "/" });
+  assert.match(home, /<input name="q" value="" placeholder="Search Foogle or type a URL"/);
+  assert.match(home, /<div class="browser loading home">/);
+  assert.match(browserShell({ originalUrl: "/search?q=bread" }), /<input name="q" value="https:\/\/www\.foogle\.com\/search\?q=bread" placeholder/);
+});
+
+test("a top-level visit gets the browser: one tab framing the page, and nothing inline that runs", () => {
   const req = { originalUrl: '/web/crumbforum.net/threads/x?fq=a&ft=%3Cb%3E"hi"&fk=forum' };
-  const html = browserBar(req, { loading: true });
-  assert.match(html, /^<!DOCTYPE html>/);
-  assert.match(html, /<foogle-bar loading data-site><template shadowrootmode="open"><style>/);
+  const html = browserShell(req);
+  assert.match(html, /^<!DOCTYPE html><html lang="en">/);
+  // The tab's page is the very URL visited, escaped.
+  assert.match(html, /<main class="views"><iframe class="on" src="\/web\/crumbforum\.net\/threads\/x\?fq=a&amp;ft=%3Cb%3E&quot;hi&quot;&amp;fk=forum"/);
   assert.match(html, /<input name="q" value="https:\/\/crumbforum\.net\/threads\/x"/);
-  assert.match(html, /<span class="h">crumbforum\.net<\/span><span class="p" data-path="\/threads\/x">\/threads\/x<\/span>/);
-  assert.match(html, /<span class="title">&lt;b&gt;&quot;hi&quot;<\/span>/); // the result title, escaped
+  assert.match(html, /<span class="h">crumbforum\.net<\/span><span class="p">\/threads\/x<\/span>/);
+  assert.match(html, /<title>&lt;b&gt;&quot;hi&quot;<\/title>/); // the result title, escaped
+  assert.match(html, /<span class="title">&lt;b&gt;&quot;hi&quot;<\/span>/);
   assert.match(html, /<form class="omni" action="\/go" method="get">/);
-  assert.match(html, /<img class="fav" src="data:image\/svg\+xml,/);
-  // /web/ pages only run Foogle's own script files: nothing inline.
-  assert.match(html, /<script src="\/fw\/browserbar\.js\?v=\w{8}" async><\/script>/);
+  assert.match(html, /<link rel="icon" href="data:image\/svg\+xml,/);
+  assert.match(html, /<script type="module" src="\/fw\/browserbar\.js\?v=\w{8}"><\/script>/);
   assert.doesNotMatch(html, /<script(?![^>]*\ssrc=)/);
   assert.doesNotMatch(html, /\son[a-z]+=/i);
-  // The page's own <title> must be the document's first.
-  assert.doesNotMatch(html, /<title/);
-  assert.match(browserBar({ originalUrl: "/" }), /<foogle-bar><template/);
-
-  const was = process.env.FOOGLE_BROWSER_BAR;
-  t.after(() => { if (was === undefined) delete process.env.FOOGLE_BROWSER_BAR; else process.env.FOOGLE_BROWSER_BAR = was; });
-  process.env.FOOGLE_BROWSER_BAR = "0";
-  assert.equal(browserBar(req), "");
 });

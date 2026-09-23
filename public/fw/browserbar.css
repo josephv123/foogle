@@ -1,20 +1,6 @@
-/* The browser bar (lib/browserbar.js), inlined into its shadow root: nothing
-   here can touch the page, and no page style can touch the bar. A neutral
-   light/dark browser look, whatever the site underneath. Heights add up to
-   --fbar-h in lib/browserbar.js: 34 + 41 on wide screens, 49 on phones. */
-:host {
-  all: initial !important;
-  display: block !important;
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  height: var(--fbar-h, 75px) !important;
-  z-index: 2147483600 !important;
-  font: 13px/1.25 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
-  color: var(--fb-text) !important;
-  -webkit-text-size-adjust: 100%;
-  -webkit-tap-highlight-color: transparent;
+/* Foogle's browser (lib/browserbar.js): a neutral light/dark browser look,
+   whatever the site in the tab. Inlined into the shell page. */
+:root {
   --fb-frame: #dee1e6;
   --fb-bar: #fff;
   --fb-omni: #f1f3f4;
@@ -25,9 +11,11 @@
   --fb-hover: rgba(60, 64, 67, .08);
   --fb-press: rgba(60, 64, 67, .16);
   --fb-accent: #1a73e8;
+  --fb-row: #e8f0fe;
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :host {
+  :root {
     --fb-frame: #202124;
     --fb-bar: #35363a;
     --fb-omni: #202124;
@@ -38,31 +26,42 @@
     --fb-hover: rgba(232, 234, 237, .08);
     --fb-press: rgba(232, 234, 237, .16);
     --fb-accent: #8ab4f8;
+    --fb-row: #3c4043;
+    color-scheme: dark;
   }
 }
-@media print { :host { display: none !important; } }
 * { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body { display: flex; flex-direction: column; height: 100dvh; background: var(--fb-bar); color: var(--fb-text); font: 13px/1.25 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
 svg { display: block; width: 20px; height: 20px; fill: currentColor; }
-a, button { color: inherit; -webkit-user-select: none; user-select: none; }
+button { font: inherit; color: inherit; -webkit-user-select: none; user-select: none; }
+.browser { position: relative; z-index: 2; flex: none; }
 
 /* ---------- tab strip ---------- */
-.tabs { display: flex; align-items: flex-end; gap: 8px; height: 34px; padding: 0 8px 0 16px; background: var(--fb-frame); -webkit-user-select: none; user-select: none; }
-.tab { position: relative; display: flex; align-items: center; gap: 8px; width: 240px; max-width: calc(100% - 44px); height: 30px; padding: 0 6px 0 12px; border-radius: 8px 8px 0 0; background: var(--fb-bar); font-size: 12px; cursor: default; }
-/* The curves where the tab flares into the toolbar. */
-.tab::before, .tab::after { content: ""; position: absolute; bottom: 0; width: 8px; height: 8px; pointer-events: none; }
-.tab::before { left: -8px; background: radial-gradient(circle at 0 0, transparent 8px, var(--fb-bar) 8.5px); }
-.tab::after { right: -8px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--fb-bar) 8.5px); }
+.tabs { display: flex; align-items: flex-end; height: 34px; padding: 0 8px 0 12px; background: var(--fb-frame); -webkit-user-select: none; user-select: none; overflow: hidden; }
+.tab { position: relative; display: flex; align-items: center; gap: 8px; flex: 0 1 240px; min-width: 44px; height: 30px; padding: 0 6px 0 12px; border-radius: 8px 8px 0 0; font-size: 12px; cursor: default; }
+.tab:not(.on):hover { background: color-mix(in srgb, var(--fb-bar) 45%, transparent); }
+/* A thin divider between inactive tabs, as in Chrome. */
+.tab:not(.on) + .tab:not(.on)::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 1px; background: var(--fb-muted); opacity: .35; }
+.tab.on { z-index: 1; background: var(--fb-bar); }
+/* The curves where the active tab flares into the toolbar. */
+.tab.on::before, .tab.on::after { content: ""; position: absolute; bottom: 0; width: 8px; height: 8px; pointer-events: none; }
+.tab.on::before { left: -8px; background: radial-gradient(circle at 0 0, transparent 8px, var(--fb-bar) 8.5px); }
+.tab.on::after { right: -8px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--fb-bar) 8.5px); }
 .ico { position: relative; flex: none; width: 16px; height: 16px; }
 .fav { display: block; width: 16px; height: 16px; border-radius: 3px; }
 .spin { display: none; position: absolute; inset: 1px; border: 2px solid var(--fb-accent); border-right-color: transparent; border-radius: 50%; animation: fb-spin .75s linear infinite; }
-:host([loading]) .fav { visibility: hidden; }
-:host([loading]) .spin { display: block; }
+.loading > .ico .fav, .card.loading .fav { visibility: hidden; }
+.loading > .ico .spin, .card.loading .spin { display: block; }
 @keyframes fb-spin { to { transform: rotate(360deg); } }
-.title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--fb-text); -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent); }
-.x, .new { display: grid; place-items: center; flex: none; border-radius: 50%; color: var(--fb-muted); text-decoration: none; }
+.title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent); }
+.x, .new { display: grid; place-items: center; flex: none; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--fb-muted); cursor: pointer; }
 .x { width: 20px; height: 20px; }
 .x svg { width: 14px; height: 14px; }
-.new { width: 28px; height: 28px; margin-bottom: 2px; }
+/* A narrow tab keeps its icon; its × only shows while it is the active one. */
+.tab { container-type: inline-size; }
+@container (max-width: 90px) { .tab:not(.on) .x, .tab:not(.on) .title { display: none; } }
+.new { width: 28px; height: 28px; margin: 0 0 2px 8px; }
 .x:hover, .new:hover { background: var(--fb-press); color: var(--fb-text); }
 
 /* ---------- toolbar ---------- */
@@ -70,20 +69,27 @@ a, button { color: inherit; -webkit-user-select: none; user-select: none; }
 .btn { display: grid; place-items: center; flex: none; width: 32px; height: 32px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--fb-muted); cursor: pointer; }
 .btn:hover { background: var(--fb-hover); color: var(--fb-text); }
 .btn:active { background: var(--fb-press); }
-.btn:disabled { color: var(--fb-muted); opacity: .4; background: none; cursor: default; }
-.btn:focus-visible, .lock:focus-visible, .x:focus-visible, .new:focus-visible { outline: 2px solid var(--fb-accent); outline-offset: -2px; }
-.reload .stop, :host([loading]) .reload .go { display: none; }
-:host([loading]) .reload .stop { display: block; }
+.btn:disabled { opacity: .4; background: none; color: var(--fb-muted); cursor: default; }
+.btn:focus-visible, .lock:focus-visible, .x:focus-visible, .new:focus-visible, .tab:focus-visible { outline: 2px solid var(--fb-accent); outline-offset: -2px; }
+.reload .stop, .browser.loading .reload .go { display: none; }
+.browser.loading .reload .stop { display: block; }
+.count { display: none; }
 
 /* ---------- address field ---------- */
-.omni { display: flex; align-items: center; flex: 1; min-width: 0; height: 32px; margin: 0 0 0 6px; padding: 0 14px 0 4px; border-radius: 16px; background: var(--fb-omni); }
+.omni { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; height: 32px; margin: 0 0 0 6px; padding: 0 14px 0 4px; border-radius: 16px; background: var(--fb-omni); }
 .omni:hover { background: var(--fb-omni-hover); }
 .omni:has(input:focus) { background: var(--fb-bar); box-shadow: inset 0 0 0 2px var(--fb-accent); }
+.omni.open { border-radius: 16px 16px 0 0; box-shadow: 0 1px 6px rgba(0, 0, 0, .28) !important; background: var(--fb-bar); }
 .lock { display: grid; place-items: center; flex: none; width: 26px; height: 26px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--fb-muted); cursor: pointer; }
 .lock:hover { background: var(--fb-press); }
 .lock svg { width: 15px; height: 15px; }
+/* On the new-tab page the field is a search box: a magnifier, no padlock. */
+.lock .q, .browser.home .lock .l { display: none; }
+.browser.home .lock .q { display: block; }
+.browser.home .lock { pointer-events: none; }
 .field { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; height: 100%; margin-left: 6px; cursor: text; }
 input { width: 100%; height: 100%; margin: 0; padding: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 14px; color: var(--fb-text); caret-color: var(--fb-accent); }
+input::placeholder { color: var(--fb-muted); }
 /* Unfocused, the field shows the address with its host picked out (the
    overlay below); focused, the plain editable text. */
 input:not(:focus) { color: transparent; }
@@ -92,24 +98,59 @@ input::selection { background: color-mix(in srgb, var(--fb-accent) 30%, transpar
 .url .w, .url .h { color: var(--fb-text); }
 input:focus + .url { visibility: hidden; }
 
+/* ---------- suggestions ---------- */
+.drop { position: absolute; top: 100%; left: 0; right: 0; padding: 6px 0 8px; border-radius: 0 0 16px 16px; background: var(--fb-bar); box-shadow: 0 6px 10px rgba(0, 0, 0, .2); overflow: hidden; }
+.drop::before { content: ""; position: absolute; top: 0; left: 14px; right: 14px; height: 1px; background: var(--fb-line); }
+.row { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 4px 16px 4px 12px; cursor: default; white-space: nowrap; overflow: hidden; }
+.row svg { flex: none; width: 18px; height: 18px; color: var(--fb-muted); }
+.row .label { overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.row .detail { color: var(--fb-muted); overflow: hidden; text-overflow: ellipsis; }
+.row .detail::before { content: "– "; }
+.row:hover { background: var(--fb-hover); }
+.row[aria-selected="true"] { background: var(--fb-row); }
+
 /* ---------- site information ---------- */
-.pop { position: fixed; inset: auto; top: calc(var(--fbar-h, 75px) - 4px); left: 88px; width: 330px; max-width: calc(100vw - 16px); margin: 0; padding: 16px 18px 6px; border: 0; border-radius: 8px; background: var(--fb-bar); color: var(--fb-text); font: inherit; box-shadow: 0 1px 3px rgba(0, 0, 0, .2), 0 8px 28px rgba(0, 0, 0, .22); }
+.pop { position: fixed; inset: auto; top: 71px; left: 88px; width: 330px; max-width: calc(100vw - 16px); margin: 0; padding: 16px 18px 6px; border: 0; border-radius: 8px; background: var(--fb-bar); color: var(--fb-text); font: inherit; box-shadow: 0 1px 3px rgba(0, 0, 0, .2), 0 8px 28px rgba(0, 0, 0, .22); }
 .pop-h { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 14px; }
 .pop-h svg { width: 16px; height: 16px; color: var(--fb-muted); }
 .pop p { margin: 0 0 10px; line-height: 1.45; color: var(--fb-muted); }
 .pop .cert { padding-top: 10px; border-top: 1px solid var(--fb-line); font-size: 12px; }
 .pop b { font-weight: 600; color: var(--fb-text); }
 
-/* ---------- phones: one row, like a mobile browser ---------- */
+/* ---------- the tabs' pages ---------- */
+.views { position: relative; z-index: 1; flex: 1; min-height: 0; background: #fff; }
+/* Hidden tabs keep their page (and its scroll) loaded, just out of sight. */
+.views iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; visibility: hidden; }
+.views iframe.on { visibility: visible; }
+
+/* ---------- phones: one row and a tab switcher, like mobile Chrome ---------- */
+.switcher { position: fixed; z-index: 3; top: 49px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--fb-frame); }
+.switcher[hidden] { display: none; }
+.sw-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; font-size: 15px; }
+.sw-head b { flex: 1; font-weight: 600; }
+.sw-new, .sw-done { display: flex; align-items: center; gap: 4px; margin: 0; padding: 8px 12px; border: 0; border-radius: 18px; background: none; color: var(--fb-accent); font-weight: 600; cursor: pointer; }
+.sw-new svg { width: 18px; height: 18px; }
+.sw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 4px 14px 24px; overflow: auto; align-content: start; }
+.card { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 104px; padding: 12px 12px 10px; border: 2px solid transparent; border-radius: 14px; background: var(--fb-bar); text-align: left; cursor: pointer; }
+.card.on { border-color: var(--fb-accent); }
+.card .top { display: flex; align-items: center; gap: 8px; padding-right: 22px; }
+.card .title { font-size: 13px; font-weight: 600; white-space: normal; -webkit-mask-image: none; mask-image: none; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.card .host { margin-top: auto; color: var(--fb-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .x { position: absolute; top: 8px; right: 8px; display: grid; }
+
 @media (max-width: 640px), (max-height: 480px) {
   .tabs, .fwd { display: none; }
   .tool { height: 49px; gap: 0; padding: 0 4px 1px; }
   .btn { width: 40px; height: 40px; }
   .btn svg { width: 22px; height: 22px; }
   .omni { height: 38px; margin: 0 2px; padding-right: 12px; border-radius: 19px; }
+  .omni.open { border-radius: 19px 19px 0 0; }
+  .drop { position: fixed; top: 49px; left: 0; right: 0; border-radius: 0; }
   /* 16px keeps iOS from zooming in when the field is tapped. */
   input, .url { font-size: 16px; }
   /* Just the site's name until the field is tapped, as phone browsers do. */
   .url .s, .url .w, .url .p { display: none; }
-  .pop { left: 8px; right: 8px; width: auto; }
+  .count { display: grid; }
+  .count span { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 3px; border: 2px solid currentColor; border-radius: 5px; font-size: 11px; font-weight: 700; line-height: 1; }
+  .pop { top: 45px; left: 8px; right: 8px; width: auto; }
 }

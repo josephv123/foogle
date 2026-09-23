@@ -47,7 +47,9 @@ const STORE = web("lanternworks.shop/storm-lanterns", { q: "storm lanterns", tit
 const addToCart = [{ click: "[data-add-to-cart]" }, { wait: ".fw-toast" }, { click: "a.cart:visible, .fw-cartfab:visible" }, { wait: ".fw-drawer[open]" }];
 
 // name, path, and optional steps; full: false shoots the viewport only (for
-// dialogs and drawers, which sit over the page).
+// dialogs and drawers, which sit over the page). Steps run in the page, inside
+// Foogle's browser (lib/browserbar.js); with browser: true they run in the
+// browser around it instead (its tabs and address bar).
 const PAGES = [
   { name: "home", path: "/" },
   { name: "search", path: "/search?q=storm%20lanterns" },
@@ -67,6 +69,9 @@ const PAGES = [
   { name: "startup-calc", path: web("sunpatch.energy/solar-savings-calculator", { q: "solar savings", title: "Solar Savings Calculator", kind: "startup" }), steps: [{ select: ["[data-calc] select", "2"] }, { check: "[data-calc] input[type=checkbox]" }] },
   { name: "quiz", path: web("keeperquiz.club/which-lighthouse-keeper-are-you", { q: "lighthouse keepers", title: "Which Lighthouse Keeper Are You? A Quiz", kind: "blog" }), steps: [{ click: "[data-q] >> nth=0 >> button >> nth=1" }, { click: "[data-q] >> nth=1 >> button >> nth=0" }, { click: "[data-q] >> nth=2 >> button >> nth=1" }, { wait: ".fw-score:visible" }] },
   { name: "cart", path: STORE, steps: addToCart, full: false },
+  // The address bar: "cnn" offers the search and cnn.com; "cnn.com" goes there.
+  { name: "omnibox", path: STORE, browser: true, full: false, steps: [{ click: ".omni input" }, { fill: [".omni input", "cnn"] }, { wait: ".drop .row >> nth=1" }] },
+  { name: "omnibox-go", path: "/", browser: true, full: false, steps: [{ click: ".omni input" }, { fill: [".omni input", "cnn.com"] }, { press: "Enter" }, { url: "/web/cnn\\.com$" }, { wait: 1500 }] },
   {
     name: "checkout", path: STORE, steps: [...addToCart,
       { fill: [".fw-checkout [name=name]", "Ada Moss"] }, { fill: [".fw-checkout [name=email]", "ada@example.com"] }, { fill: [".fw-checkout [name=address]", "1 Pier Rd, Port Avery"] },
@@ -155,7 +160,7 @@ async function runStep(page, step, timeout, problems) {
   if (step.fill) return page.locator(step.fill[0]).first().fill(step.fill[1], { timeout });
   if (step.select) return page.locator(step.select[0]).first().selectOption(step.select[1], { timeout });
   if (step.check) return page.locator(step.check).first().check({ timeout });
-  if (step.press) return page.keyboard.press(step.press);
+  if (step.press) return (page.page?.() ?? page).keyboard.press(step.press); // a frame's keys are its page's
   if (step.url) return page.waitForURL(new RegExp(step.url), { timeout, waitUntil: "load" });
   if (typeof step.wait === "number") return page.waitForTimeout(step.wait);
   if (step.wait) return page.locator(step.wait).first().waitFor({ timeout });
@@ -179,14 +184,15 @@ async function shoot(browser, base, spec, vp) {
   try {
     await page.goto(base + spec.path, { waitUntil: "load", timeout });
     await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
-    const width = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth));
+    const tab = await tabFrame(page);
+    const width = await tab.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth));
     if (width > VIEWPORTS[vp].viewport.width) problems.push(`page is ${width}px wide on a ${VIEWPORTS[vp].viewport.width}px screen (horizontal overflow)`);
     for (const step of spec.steps ?? []) {
-      await runStep(page, step, timeout, problems).catch((err) => { throw new Error(`step ${JSON.stringify(step)}: ${err.message.split("\n")[0]}`); });
+      await runStep(spec.browser ? page : tab, step, timeout, problems).catch((err) => { throw new Error(`step ${JSON.stringify(step)}: ${err.message.split("\n")[0]}`); });
     }
     if (spec.steps?.length) await page.waitForTimeout(250); // let toasts and transitions settle
-    if (await page.getByText("collapsed mid-construction").count()) problems.push("page generation failed (collapse notice on the page)");
-    if (spec.full !== false) await page.addStyleTag({ content: UNFRAME });
+    if (await tab.getByText("collapsed mid-construction").count()) problems.push("page generation failed (collapse notice on the page)");
+    if (spec.full !== false && tab !== page.mainFrame()) await unframe(page, tab);
     await page.screenshot({ path: file, fullPage: spec.full !== false, animations: "disabled" });
     return { ...spec, vp, file, ms: Date.now() - started, problems };
   } catch (err) {
@@ -196,10 +202,22 @@ async function shoot(browser, base, spec, vp) {
   }
 }
 
-// The browser bar (lib/browserbar.js) makes <body> a scroll box under it, and
-// a full-page screenshot can't see past the box's first screen. For those,
-// the document scrolls as usual, with room at the top for the bar.
-const UNFRAME = "html{overflow:visible!important;padding-top:var(--fbar-h,0)!important}body{position:static!important;overflow:visible!important}";
+// A top-level visit gets Foogle's browser (lib/browserbar.js), and the page
+// is in its visible tab, an iframe. Without the browser (FOOGLE_BROWSER_BAR=0)
+// it is the page itself.
+async function tabFrame(page) {
+  const iframe = await page.$(".views iframe.on");
+  return (await iframe?.contentFrame()) ?? page.mainFrame();
+}
+
+// A full-page shot can't see past the tab's first screen, so the tab is
+// stretched to its page's full height first: the shot is the browser's bar
+// over the whole page.
+async function unframe(page, tab) {
+  const height = await tab.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
+  await page.addStyleTag({ content: `html,body{height:auto!important;overflow:visible!important}.views{flex:none!important;height:${height}px!important}` });
+  await page.waitForTimeout(100);
+}
 
 // Run jobs a few at a time.
 async function pool(jobs, size) {
