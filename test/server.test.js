@@ -116,13 +116,26 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   assert.match(cached, /Section 4/);
   assert.ok(!output.includes("SECTION_CALL=5"));
 
-  // Every page opens with a browser bar showing the URL a real browser would.
-  assert.match(page, /^<!DOCTYPE html><html><head>.*?<\/head><body>\n<foogle-bar(?: loading)? data-site>/s);
-  assert.match(page, /<input name="q" value="https:\/\/garden\.example\/repairs"/);
-  assert.match(cached, /^<!DOCTYPE html>[\s\S]*?<foogle-bar data-site>/);
-  assert.match(serp, /<foogle-bar loading>[\s\S]*value="https:\/\/www\.foogle\.com\/search\?q=greenhouse"/);
-  const home = await (await fetch(`${base}/`)).text();
-  assert.match(home, /<foogle-bar>[\s\S]*value="https:\/\/www\.foogle\.com\/"[\s\S]*I'm Feeling Lucky/);
+  // A top-level visit gets the browser, framing the page; the frame (or any
+  // fetch) gets the page itself, the same as with the browser off.
+  const visit = (path) => fetch(base + path, { headers: { "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate" } });
+  const shellRes = await visit("/web/garden.example/repairs?fq=greenhouse");
+  assert.match(shellRes.headers.get("vary"), /Sec-Fetch-Dest/i);
+  assert.match(shellRes.headers.get("content-security-policy"), /frame-src 'self'/);
+  const shell = await shellRes.text();
+  assert.match(shell, /<input name="q" value="https:\/\/garden\.example\/repairs"/);
+  assert.match(shell, /<iframe class="on" src="\/web\/garden\.example\/repairs\?fq=greenhouse"/);
+  assert.doesNotMatch(page, /class="browser/);
+  assert.match(await (await visit("/search?q=greenhouse")).text(), /value="https:\/\/www\.foogle\.com\/search\?q=greenhouse"/);
+  assert.match(await (await visit("/")).text(), /<input name="q" value="" placeholder="Search Foogle or type a URL"/);
+  // Known sites for the address bar's suggestions, and a tab's favicon.
+  assert.deepEqual((await (await fetch(`${base}/api/sites?q=cnn`)).json()).rows.map(r => r.target), ["/web/www.cnn.com"]);
+  const icon = await fetch(`${base}/api/favicon?url=${encodeURIComponent("/web/www.cnn.com")}`);
+  assert.equal(icon.headers.get("content-type"), "image/svg+xml; charset=utf-8");
+  assert.match(await icon.text(), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  const homePage = await fetch(`${base}/`);
+  assert.match(homePage.headers.get("vary"), /Sec-Fetch-Dest/i);
+  assert.match(await homePage.text(), /I'm Feeling Lucky/);
   // Its address field goes to sites or searches, like an omnibox.
   const go = (q) => fetch(`${base}/go?q=${encodeURIComponent(q)}`, { redirect: "manual" }).then(r => r.headers.get("location"));
   assert.equal(await go("garden.example/repairs"), "/web/garden.example/repairs");
