@@ -5,30 +5,15 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { streamText, generateImage, extractJSON, config } from "./lib/llm.js";
 import {
-  searchResultsPrompt, newsResultsPrompt, imageResultsPrompt, pagePrompt,
+  searchResultsPrompt, newsResultsPrompt, imageResultsPrompt,
   searchShardPrompt, newsShardPrompt, imageShardPrompt,
   SEARCH_ANGLES, NEWS_ANGLES, IMAGE_ANGLES,
-  pagePlanPrompt, pageSectionPrompt,
 } from "./lib/prompts.js";
-import { normalizePlan, themeCSS, themeHeader, themeFooter, heroImagePrompt } from "./lib/theme.js";
+import { generatePage, pageMode } from "./lib/pages.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
-// Ceiling on a generated page. Frontier models stop well short of this; small
-// local models can spiral into repetition instead of closing the document, so
-// this doubles as a stop-loss on a page that has stopped making progress.
-const PAGE_MAX_TOKENS = parseInt(process.env.FOOGLE_PAGE_MAX_TOKENS ?? "16000", 10) || 16000;
-// Ceiling per section in fast-page mode. Sections are asked for 70-130 words;
-// this is the stop-loss for one that starts looping instead of closing.
-const SECTION_MAX_TOKENS = parseInt(process.env.FOOGLE_SECTION_MAX_TOKENS ?? "700", 10) || 700;
-// Model-drawn images on generated pages. They're the single most expensive
-// asset (each is its own generation) and on a local model they compete for the
-// same decode slots as the page itself, so they're off by default there — the
-// themed hero/.thumb panels are pure CSS and render instantly. SERP thumbnails
-// and the Images tab are unaffected.
-const PAGE_IMAGES = /^(1|true|on)$/i.test(process.env.FOOGLE_PAGE_IMAGES ?? (config.isLocal ? "0" : "1"));
-
 // ---------- caches ----------
 const CACHE_MAX = 200;
 const IMG_CACHE_MAX = 60;
@@ -614,7 +599,7 @@ function startPageGeneration(webPath, promptArgs) {
       notify();
     };
     try {
-      for await (const delta of streamText({ ...pagePrompt(promptArgs), model: config.pageModel, maxTokens: PAGE_MAX_TOKENS, temperature: config.tempPages })) {
+      for await (const delta of generatePage(promptArgs)) {
         pending += delta;
         if (!headDone) {
           if (pending.length < 24 && !/\S\s*\n/.test(pending)) continue;
@@ -685,14 +670,14 @@ app.use("/web", async (req, res) => {
   await pipeEntry(entry, res);
 });
 
-app.listen(PORT, () => {
-  console.log(`Foogle running at http://localhost:${PORT}`);
+const listener = app.listen(PORT, () => {
+  console.log(`Foogle running at http://localhost:${listener.address().port}`);
   console.log(`  provider: ${config.baseURL}`);
   console.log(`  results:  ${config.resultsModel}`);
-  console.log(`  pages:    ${config.pageModel}`);
+  console.log(`  pages:    ${config.pageModel} (${pageMode})`);
   console.log(`  images:   ${config.imageModel} (${config.imageApi} api)`);
   if (config.apiKey) {
-    console.log(`  api key:  ${config.apiKey.slice(0, 8)}…${config.apiKey.slice(-4)} (${config.apiKey.length} chars)`);
+    console.log("  api key:  configured");
   } else {
     console.warn("  ⚠ no usable API key — set LLM_API_KEY in .env to your real key (the sk-or-... placeholder doesn't count)");
   }

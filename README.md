@@ -4,13 +4,17 @@ The fake/future Google. You use it exactly like Google: type a query, get a resu
 
 ## Setup
 
-Requires Node.js 20.6+ for the `.env` command below.
+Requires Node.js 20.12+ for the launcher.
 
 ```sh
 cp .env.example .env   # then put your API key in it
 npm install
-node --env-file=.env server.js  # http://localhost:3000
+npm start  # Luna + Jev at http://localhost:3000
 ```
+
+The default launcher uses GPT-6 Luna through OpenRouter for search results, page sections and ASCII images, with Jev choosing the page layout. Add `OPENROUTER_API_KEY` and `TYPESAFE_API_KEY` to `.env`. Without a TypeSafe key, Luna handles planning too.
+
+Use `npm start -- --preset current` to honor a custom provider/model configuration. The table below describes that custom configuration.
 
 Foogle is provider-agnostic: it speaks the OpenAI-compatible chat-completions API, so any provider works — OpenRouter (default), OpenAI, Ollama, LM Studio, etc.
 
@@ -28,7 +32,7 @@ Foogle is provider-agnostic: it speaks the OpenAI-compatible chat-completions AP
 | `FOOGLE_IMAGE_CONCURRENCY` | `6` | Max parallel image generations |
 | `PORT` | `3000` | |
 
-`npm start` reads the environment directly — load `.env` with `node --env-file=.env server.js`, or export the vars yourself.
+`npm start` loads `.env` automatically. Override the default with `--preset`, `--mode`, or `FOOGLE_PRESET` / `FOOGLE_PAGE_MODE` in `.env`.
 
 ## How it works
 
@@ -39,3 +43,64 @@ Foogle is provider-agnostic: it speaks the OpenAI-compatible chat-completions AP
 - `GET /img/<description>` — on-demand image generation, used by the Images/News tabs and by `<img>` tags the page model writes. Cached; falls back to a gradient placeholder on failure.
 - `GET /web/<domain>/<path>` — the fake web. On first visit, the page model generates a complete self-contained HTML page for that URL and streams it to your browser as it's written. Generated pages only link to other `/web/…` paths, so every click works.
 - Pages and result pages are cached in memory (capped, FIFO), so the back button is instant and a fake site stays consistent within a session. Restarting the server wipes the fake internet — except images, which also persist to a disk cache (`.foogle-cache/`) since they're the most expensive asset. Delete that directory to regenerate them.
+
+
+## Model experiments and Jev
+
+Keep `OPENROUTER_API_KEY` in `.env`. Hosted presets use that key and override the
+old local endpoint/model values for that process; they do not rewrite `.env`.
+
+```sh
+npm start -- --preset luna --mode jev --port 3010
+npm start -- --preset mimo-pro --mode jev --jev-env /path/to/jev/.env --port 3010
+npm start -- --preset free-laguna --mode jev --jev-env /path/to/jev/.env --port 3010
+```
+
+Presets: `current` (existing config), `mimo-flash`, `mimo-pro`, `deepseek`,
+`gemini`, `luna`, `free-qwen`, `free-laguna`, `free-nemotron`, `free-gemma`. Pinned model IDs live in
+`lib/presets.js`; availability is verified against OpenRouter's catalog by the
+benchmark. Free endpoints can be rate-limited or unavailable. No paid fallback
+is silently substituted for a free model. Hosted presets use ASCII images;
+image-generation cost is separate from the text benchmarks.
+
+Page modes (`FOOGLE_PAGE_MODE` or `--mode`):
+
+| Mode | Pipeline | Tradeoff |
+|---|---|---|
+| `single` | One model generates complete HTML/CSS | Most freedom; CSS delays the first styled content |
+| `planned` | Small text-model plan, existing CSS, three concurrent section calls | Less CSS generation, an extra planning call |
+| `jev` (launcher default) | Jev chooses layout/style, code renders shell, three concurrent section calls | Fast styled shell, constrained layout vocabulary |
+
+For Jev, set `TYPESAFE_API_KEY` in `.env`, or explicitly load a separate env file
+with `--jev-env`. Keys stay server-side. Jev asks layout and visual-style questions
+in one request. The hue derives from the domain. Low-confidence harmless styling
+choices are accepted; these are preferences, not factual judgments. A 1.8-second
+Jev deadline falls back to a text planner in `jev` mode. The planner falls back to
+full-page generation if it fails. Partial/invalid sections are not cached.
+
+## Repeatable comparison
+
+```sh
+npm run bench -- --jev-env /path/to/jev/.env
+npm run bench -- --presets free-qwen,free-laguna,free-nemotron --modes single,jev --jev-env /path/to/jev/.env
+npm run bench -- --presets mimo-flash,gemini --modes single,planned,jev --runs 3 --cases 3 --jev-env /path/to/jev/.env
+npm test
+```
+
+Each run saves raw HTML/text and `report.json` under ignored `.foogle-bench/`.
+Use `--out PATH --resume` to retain completed trials. Multiple models run in
+isolated processes, at most three concurrently. Trials bypass app caches and use
+fixed temperatures, 6,000 full-page tokens, 1,200 tokens per section, and three
+sections. Every preset also gets a search-result trial. This is an experiment,
+not an automatic production model switch.
+
+The report records first valid search result / first emitted styled HTML with
+visible content, completion time, provider-reported OpenRouter cost, Jev input
+tokens, finish reasons, basic HTML checks and errors. Emission time is a server
+proxy, **not browser paint time**. A template header counts as first content, so
+compare completion time and review the saved HTML too. Generated images are not
+fetched. Jev charges are not included in the OpenRouter cost; missing billing
+usage stays unknown. Structural checks are not a visual-quality score. Small
+samples are a screening test, not a reliable ranking of production latency.
+
+See [EXPERIMENTS.md](EXPERIMENTS.md) for measured results and limitations.
