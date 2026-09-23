@@ -286,6 +286,93 @@ In Foogle, with the prototype below and the three text media left as SVGs, a col
 - OpenRouter charged $0.014 for a 0.2-megapixel picture, which looks like a one-megapixel minimum. BFL's or fal's own API may bill the real size: fal quotes klein at $0.009 a megapixel with sub-second inference (not verified; needs a `FAL_KEY`), which would beat SVG outright.
 - Site palettes in the raster prompt (as hex colours) and painted pictures on generated sites weren't checked: the account ran out of credit first.
 
+## Google diffusion models — 2026-09-23
+
+Can any of Google's text diffusion models beat Luna? Gemini Diffusion can't be called anywhere. DiffusionGemma (26B MoE with ~4B active, open weights, Apache-2.0, released at I/O 2026) can be called for free on one community endpoint. It was tested there on Foogle's real prompts, through Foogle's own prompt builders, JSONL rules and page pipeline (`generatePage`), so it got exactly the prompts Luna gets (`experiments/diffusiongemma/bench.js`). On that box it is faster than Luna when nobody else is using it, but its output is worse and the box can't carry Foogle. Nothing was adopted. The Luna side cost $0.022. Image models were out of scope: Foogle doesn't use image diffusion.
+
+**Where it can be called.** Checked against each host's public model list on 2026-09-23. No sign-ups were made.
+
+| Where | DiffusionGemma? | Cost | What it takes |
+|---|---|---|---|
+| Gemini API (the AI Studio key) | No. `gemini-diffusion`, `-exp` and `diffusiongemma*` all return 404. The key's 61 models include Gemma 4 26B-A4B, the autoregressive version, but no diffusion model | | |
+| Gemini Diffusion, anywhere | No. DeepMind's page now calls it "an experimental demo", with no API and no waitlist link | | |
+| OpenRouter, Hugging Face Inference Providers, Groq, Together, Cloudflare Workers AI, DeepInfra, Fireworks, Novita, SambaNova, Cerebras, Vercel AI Gateway, Chutes | Not listed. Artificial Analysis also lists no API providers | | |
+| [Community endpoint](https://huggingface.co/spaces/victor/DiffusionGemma-free-endpoint) on HF Inference Endpoints (`6ab255d535c41fcea4a331db.endpoints.huggingface.cloud`) | **Yes.** OpenAI-compatible, plus a Jev-compatible `/v1/systemone` | Free, no key | ~300 requests/min, bursts of 120 and 16 in flight per IP. One A100 80GB (BF16), shared with anyone who calls it. A demo with no SLA: it moved from an H200 to an A100 on 2026-09-22 "since usage is light" |
+| NVIDIA API catalog (`integrate.api.nvidia.com`, `google/diffusiongemma-26b-a4b-it`) | Yes, as a preview | Free trial | A free NVIDIA Developer account and key, 40 requests/min. Not tried: it needs a sign-up |
+| Codiv (`api.codiv.ai`, `diffusiongemma-26b`, NVFP4) | Yes, a community host | Free, 10M tokens per account | A sign-up, and at most 8 generations run at once across all users. Not tried |
+| Vertex AI Model Garden | Only as a deploy to your own GPU endpoint, not as a per-token API | GPU by the hour | GCP billing |
+| This Mac (16 GB RAM, 14 GB free disk) | No. There is no smaller DiffusionGemma. The smallest build is a 10 GB 2-bit GGUF, 4-bit needs ~18 GB, and llama.cpp support is an unmerged PR | | |
+
+**The free endpoint.** It streams in 64-token blocks of ~300 characters, so a section arrives in 5-10 chunks where Luna's arrives in ~450. Its vLLM `/metrics` are public, which shows the load and what the sampler does. Alone, one stream wrote 164-212 tokens/s, with its first block at 0.35-0.44s, committing 4-5.6 tokens per denoising step (~22ms a step). That is about the speed of Luna on Azure. It is not the 1,000+ tokens/s Google quotes, which is for an H100 in FP8 with the full 256-token canvas. This box is one GPU for everyone:
+
+| Calls at once (300 tokens each, box otherwise idle) | First block p50 | Done p50 | Tokens/s per stream | Tokens/s for the box |
+|---|---:|---:|---:|---:|
+| 1 | 0.35s | 1.8s | 193 | 193 |
+| 4 | 0.58s | 3.3s | 113 | 396 |
+| 8 | 0.79s | 4.7s | 78 | 541 |
+| 14 (one Foogle search, with its two prefetched pages) | 1.38s | 7.7s | 45 | 573 |
+
+**Against Luna on Foogle's prompts.** Both ran in the same hour, alternating which model went first. Search: 4 queries ("sourdough starter not rising", "mars colony jobs", "how to fix a leaky faucet", "letterboxd"), each 3 shards plus the Overview, sent as `resultsRoute` sends them. Pages: 6 kinds (forum, store, wiki, news, blog, startup) × 2 runs, one page at a time, each through `generatePage` with a fixed plan: a fact sheet and 4 concurrent sections. Per-call figures cover every call.
+
+| | DiffusionGemma (free endpoint) | Luna |
+|---|---:|---:|
+| Search: first result | 0.8-1.0s | 1.7-2.1s |
+| Search: all results | 2.8-3.5s | 4.3-9.0s |
+| Search: Overview | 2.9-3.4s | 4.2-6.8s |
+| Result lines parsed / following the field rules | 35 of 36 / 33 | 39 (one shard wrote 6) / 39 |
+| Overview JSON parsed | 7 of 12 | 4 of 4 |
+| "letterboxd": its first line, the real site | written, but a `]` was missing, so the line was dropped | ✓ |
+| Page: first section p50 | 0.83s | 1.67s |
+| Page: done p50 (p90, max) | 6.6s (7.4s, 23.0s) | 9.6s (12.6s, 25.6s) |
+| Pages failed | 0 of 12 | 0 of 12 |
+| Pictures asked for that were included | 15 of 24 | 22 of 24 |
+| Sections with invented classes | 8 of 48 (`text`, `explain`, `comments`) | 0 of 48 |
+| Sections over the 150-word cap (words p50) | 31 of 48 (165) | 22 of 48 (148) |
+| Interactive components | 32 | 31 |
+| Per call: first chunk p50 / tokens/s p50 / chunks p50 | 0.8s / 110 / 8 | 1.0s / 71 / 412 |
+| $ | 0 | $0.0008 a results page, $0.0016 a page |
+
+Luna was slower in this hour than in the runs above, where pages took 6.3-6.5s p50. DiffusionGemma's 23s page is the one where 49 of other people's requests hit the box mid-page, which dropped its sections to 25-29 tokens/s. On the 10 pages with no outside traffic it never took more than 7.4s. Luna's 25.6s page was one slow stream plus a section that ran to the token limit.
+
+What the output was like:
+- **Structure.** DiffusionGemma makes slips in brackets and keys that an autoregressive model rarely makes. An Overview lost its `"facts":` key, and the real-site line lost a `]`. The same Gemma 4 26B-A4B decoded autoregressively (free on the Gemini API, `reasoning_effort: "minimal"`) parsed 3 of 3 Overviews, marked letterboxd real, and kept 26 of its 27 lines to the field rules, so the decoding causes the slips, not the model. It is no rescue, though: 44 tokens/s, results done in 7.8-8.7s, and 4 of 16 calls answered 503 "high demand". Settings don't fix the slips. A tighter entropy bound made no difference, a 32-token canvas was slower with the same result, and vLLM rejects `response_format` ("Structured outputs are not yet supported for diffusion language models").
+- **Results.** They are specific and varied, but repeat within a page: "Level 4 certification" in 3 of 9 Mars-colony results, and "Jan 12, 2024" as the date of three faucet results, where the rules say never two alike. There are small slips too: "clockwise clockwise", "Hydroics". Luna's had none of these.
+- **Pages.** They look about as designed as Luna's (below). The content is more generic, sections repeat each other's tables, and the store page has a stray word ("own") and a picture laid over its spec table. Both models let product names drift between concurrent sections: DiffusionGemma's 90mm is "The Zenith" in the grid and "The Sentinel" in the table, and Luna's 80mm is "Northstar 80" and then "Admiral 80". The grey boxes are pictures, which weren't drawn for these screenshots.
+
+![The same store page written by DiffusionGemma and Luna](experiments/diffusiongemma/cmp-pages-store.jpg)
+
+**Decisions: its Jev-compatible API.** The endpoint also answers Jev's `/v1/systemone` wire format. It seeds the diffusion canvas with the answer template and reads each slot's label probabilities in one denoising step. Foogle's two Jev requests were sent unchanged to both services:
+
+| | Jev | DiffusionGemma |
+|---|---:|---:|
+| Query classification, 22 queries labelled by hand: card type / blank tool / typo | 22 / 21 / 22 correct | 22 / 21 / 22 correct |
+| Its latency p50 (p90) | 242ms (308ms) | 77ms (83ms) |
+| Page plan, 11 URLs: kind / real site (cnn, reddit, wikipedia) | 11 / 11 correct | 11 / 11, the same answers |
+| Its latency p50 | 269ms | 462ms, as 3 requests of 8 questions: it rejects 11 or more at once ("label 'no' is not a single token") |
+| Styles rated 0.9 or more per site | 0 | 6-9 |
+
+Both missed the same query: "mortgage calculator" counts as a tool with nothing in it. DiffusionGemma's probabilities sit near 0 or 1, and its style ratings saturate. `pickStyle`, calibrated on Jev's ratings, still chose the same style for 6 of 8 sites, but would need recalibrating.
+
+**Verdicts.**
+- Results, the Overview and page sections: no. When the free box is idle, DiffusionGemma is 1.5-2 times faster than Luna. But it breaks JSON (5 Overviews in 12, the one real-site line), drops a third of the pictures and invents classes. And one A100 shared with the internet can't carry Foogle: a single search with its prefetch is 14 calls, which already cuts each stream to 45 tokens/s, and every Foogle visitor comes from the server's one IP, under one 16-in-flight limit.
+- Instant-answer classification: the one place it beat what we have. It was as accurate as Jev at a third of the latency. But Jev's ~0.24s already lands before the first result, so the saving wouldn't show, and switching would put a free community demo on the path of every search. Keep Jev. The same decision server can be self-hosted (OpenJev, vLLM PR 57250) if Jev ever goes away.
+- Gemini Diffusion: it can't be called.
+- Speed on proper hardware (an H100 in FP8, where Google quotes 1,000+ tokens/s and Simon Willison measured at least 500 tokens/s end to end on NVIDIA's endpoint) would need an NVIDIA Developer account (free, but 40 requests/min, too few for Foogle) or a GPU of our own, at dollars an hour against Foogle's `DAILY_BUDGET_USD=1`. Even at that speed, the JSON slips and thinner pages remain.
+
+**Reproduce.**
+
+```sh
+node experiments/diffusiongemma/bench.js search dgemma luna          # 4 queries: 3 shards and the Overview each
+node experiments/diffusiongemma/bench.js pages dgemma luna --runs 2  # 6 kinds of page
+node experiments/diffusiongemma/bench.js jev                         # needs TYPESAFE_API_KEY
+```
+
+Raw outputs, the pages' HTML and JSON reports go to `.foogle-bench/diffusiongemma/`. `gemma4` is the autoregressive control and needs `GEMINI_API_KEY`. Luna calls stop at `LUNA_BUDGET_USD` (default $0.25).
+
+**Open questions.**
+- How NVIDIA's endpoint does on Foogle's prompts, and whether it streams per block. This needs a free NVIDIA Developer account.
+- Whether a section writer that leaves JSON alone would get most of the speed with few of the slips, for example DiffusionGemma for sections 2-4 only, with code placing the pictures (as suggested for Mercury above). On this endpoint it isn't worth trying, because the box is the bottleneck.
+
 ## Live references
 
 - [OpenRouter model catalog](https://openrouter.ai/api/v1/models) — exact IDs and prices were checked before trials.
