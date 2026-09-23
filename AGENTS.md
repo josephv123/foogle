@@ -1,13 +1,16 @@
 # Notes for agents
 
-Foogle is a fake search engine. A model invents the results, and clicking one generates that page on the spot. README.md explains how it works. The code is plain ESM for Node 20.12+, with no build step. `server.js` holds the routes, `lib/` everything else, `public/fw/` the widget runtime for generated pages, and `test/` the node:test suite.
+Foogle is a silly project that recreates Google, but all of the results are AI generated.  A model invents the results, and clicking one generates that page on the spot.
+
+The purpose is to push real time AI artifact generation to its limits and see how well we can replicate Google's UX via AI generation. This also mean's Google's speed is important. So is the realism and diversity of its results and webpages.  
+
+README.md explains how it works. The code is plain ESM for Node 20.12+, with no build step. `server.js` holds the routes, `lib/` everything else, `public/fw/` the widget runtime for generated pages, and `test/` the node:test suite.
 
 ## Verifying a change
 
 Verify with a fake model first, and use a real one only when you have to.
 
 - **Layout, UI or interactivity changes.** This covers the theme and styles, widgets, the results pages, routes and forms. Run `npm test`, then `npm run shots`. The shots run uses the fake model (`FOOGLE_FAKE_LLM`), so it is free and takes about 15 seconds. Look at `.shots/contact.png`, then the full PNGs for the pages you touched. Read the warnings it prints (page errors, console errors, horizontal overflow, intercepted clicks). Narrow a run with `--only "store|cart"`.
-- **Pages open in Foogle's browser.** A top-level visit gets the browser shell (tabs and address bar, `lib/browserbar.js`), and the page sits in the visible tab's iframe; a fetch or the frame itself gets the page alone. `npm run shots` runs steps and checks in the tab's page (`browser: true` runs them in the shell instead), and `FOOGLE_BROWSER_BAR=0` serves pages without the browser.
 - **Interactive flows.** Don't drive a browser click by click to check one. Add the flow as scripted `steps` on a page in `PAGES` in `scripts/shots.js` (click, fill, select, check, press, wait, url), the way the cart and checkout pages do.
 - **Changes to what the model writes** (prompts, briefs, hints, image briefs). Only these need the live model, and even then keep it to a handful of pages: `npm run shots -- --live --only "forum|wiki"`. To iterate on the same pages repeatedly, record them once and replay them for free:
   1. Record: `FOOGLE_LLM_CACHE=record npm start -- --port 0`
