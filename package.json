@@ -1,12 +1,13 @@
 {
   "name": "foogle",
   "version": "1.0.0",
-  "description": "Fake/future Google \u2014 search results are invented, and clicking one vibe-codes the page on the spot.",
+  "description": "Fake/future Google — search results are invented, and clicking one vibe-codes the page on the spot.",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node scripts/start.js",
-    "test": "node --test"
+    "test": "node --import ./scripts/clean-test-env.js --test",
+    "shots": "node scripts/shots.js"
   },
   "engines": {
     "node": ">=20.12"
@@ -15,5 +16,8 @@
   "dependencies": {
     "express": "^5.2.1",
     "openai": "^6.42.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
   }
 }

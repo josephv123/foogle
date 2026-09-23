@@ -82,8 +82,23 @@ The Blueprint also sets `TRUST_PROXY=1` (Render sits behind a proxy, so visitors
 
 On the free tier the service sleeps after 15 minutes without traffic, and the next visit takes up to about a minute to wake it. Its filesystem is ephemeral, so the image disk cache (`.foogle-cache/`) starts empty after each deploy or restart and only saves repeat work while the instance is up.
 
+## Developing
+
+Most changes are to layout, UI or interactivity, and none of those need the real model:
+
+```sh
+FOOGLE_FAKE_LLM=1 npm start   # the whole site with canned model output: no keys, no network, no cost
+npm run shots                 # screenshots of 15 representative pages at two widths, plus a contact sheet
+```
+
+- **Fake model.** With `FOOGLE_FAKE_LLM=1`, every model call and every Jev call gets instant, canned output (`lib/fake-llm.js`, fixtures in `lib/fake-fixtures.js`). That covers search shards, the Overview, fact sheets, page sections, pictures, News/Maps/Timelines, comment replies and confirmation pages. The output is built from the prompt in the real formats: result lines, sections made of the real components and interactive widgets, SVGs in every medium, and sites of every kind in varied styles. So the real parsing, streaming, sanitizing and rendering code all runs. The same query or URL always gives the same page, and different ones differ. Output streams in 32-character chunks, `FOOGLE_FAKE_LLM_DELAY_MS` apart (default 3; 0 for none). A site gets any design style its URL names, as in `/web/zine.example/web1996/issue-1`. Fake pictures are cached under their own model name, so they never mix with real ones.
+- **Record and replay.** `FOOGLE_LLM_CACHE=record` saves every real model and Jev response, keyed by a hash of its prompt, to `FOOGLE_LLM_CACHE_DIR` (default `.foogle-cache/llm`). `FOOGLE_LLM_CACHE=replay` answers from those files without touching the network. Capture one real run, then iterate against it for free. A prompt that wasn't recorded gets canned output, with a warning in the log. Like fake mode, replay caches pictures under its own model name.
+- **Screenshots.** `npm run shots` (`scripts/shots.js`) starts Foogle in fake mode on a free port and stops it afterwards. It visits the home page, the All, Images, News, Maps and Timelines results, a store, a forum, a news site, a wiki, a 1996-style zine, a calculator and a quiz. It also shoots an open cart and a checkout confirmation. Each page is taken at 1280 and 390 px wide, and the PNGs plus `contact.png` go to `.shots/`. A full run takes about 15 seconds. Pages can run scripted steps first (`click`, `fill`, `select`, `check`, `press`, `wait`, `url`), which is how the cart and checkout are captured. The run reports page errors, console errors, horizontal overflow and clicks that something else intercepted. Flags: `--only <regex>` picks pages by name, `--url <base>` uses a Foogle that's already running, `--live` uses the real model (this costs money) and `--out <dir>` sets the output directory. If Playwright's Chromium is missing, the first run installs it.
+
 ## Tests
 
 ```sh
 npm test
 ```
+
+The tests stub the network and need no keys. They ignore `FOOGLE_FAKE_LLM` and `FOOGLE_LLM_CACHE` if you've exported them, and they don't need Playwright's browsers.
