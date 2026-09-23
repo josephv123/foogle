@@ -867,14 +867,17 @@ if (typeof document !== "undefined" && !globalThis.__ia) {
   }
 
   // ---------- clock ----------
+  // A place's clock, or the visitor's own (d.local), in their browser's zone.
   function clock(card) {
     const d = data(card);
-    const opts = { timeZone: d.tz || "UTC" };
-    const shift = d.tz ? 0 : d.utcOffset * 3_600_000;
+    const opts = d.local ? {} : { timeZone: d.tz || "UTC" };
+    const shift = d.tz || d.local ? 0 : d.utcOffset * 3_600_000;
     const tick = () => {
       const at = new Date(Date.now() + shift);
+      const abbr = d.local ? new Intl.DateTimeFormat("en-US", { timeZoneName: "short" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value : d.abbr;
       $(".ia-time-big", card).textContent = at.toLocaleTimeString("en-US", { ...opts, hour: "numeric", minute: "2-digit" });
-      $(".ia-time-date", card).textContent = `${at.toLocaleDateString("en-US", { ...opts, weekday: "long", month: "long", day: "numeric", year: "numeric" })}${d.abbr ? ` (${d.abbr})` : ""}`;
+      $(".ia-time-date", card).textContent = `${at.toLocaleDateString("en-US", { ...opts, weekday: "long", month: "long", day: "numeric", year: "numeric" })}${abbr ? ` (${abbr})` : ""}`;
+      if (d.local) return;
       // How far ahead of the visitor's own clock it is.
       const diff = ((d.tz ? zoneOffset(d.tz) : d.utcOffset * 60) + new Date().getTimezoneOffset()) / 60;
       const h = Math.abs(diff);
