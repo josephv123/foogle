@@ -19,6 +19,11 @@ test("every style renders complete CSS, header and footer for every kind", () =>
         const css = themeCSS(plan);
         assert.doesNotMatch(css, /undefined|NaN|\[object/, `${style}/${kind}/${site}`);
         assert.equal(css.split("{").length, css.split("}").length, `unbalanced braces in ${style}/${kind}`);
+        // Dialogs and the cart drawer (public/fw/widgets.css) are painted with
+        // --panel, so it must be an opaque colour.
+        const panel = css.match(/--panel:([^;]+);/)[1];
+        assert.match(panel, CSS_COLOR, `${style} panel`);
+        assert.doesNotMatch(panel, /^(rgba|hsla)/, `${style} panel must be opaque`);
         const header = themeHeader(plan, site, { art: true });
         assert.match(header, new RegExp(`class="hero hero-${siteStyle(plan).hero}"`));
         assert.doesNotMatch(header + themeFooter(plan, site), /undefined/);
