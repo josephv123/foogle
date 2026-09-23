@@ -14,7 +14,7 @@ test("requests go to Luna on OpenRouter without reasoning, and truncation fails"
     return new Response(events.map(e => `data: ${JSON.stringify(e)}\n\n`).join("") + "data: [DONE]\n\n", { headers: { "Content-Type": "text/event-stream" } });
   };
   process.env.OPENROUTER_API_KEY = "test";
-  const { completeText, streamText } = await import("../lib/llm.js");
+  const { completeText, streamText, TruncatedError } = await import("../lib/llm.js");
   const spec = { system: "test", user: "test", maxTokens: 20, temperature: 0.7 };
   assert.equal(await completeText(spec), "ok");
   assert.equal(seen[0].url, "https://openrouter.ai/api/v1/chat/completions");
@@ -24,6 +24,7 @@ test("requests go to Luna on OpenRouter without reasoning, and truncation fails"
   let text = "";
   for await (const c of streamText(spec)) text += c;
   assert.equal(text, "hello");
-  await assert.rejects(completeText({ ...spec, user: "truncate" }), /token limit/);
-  await assert.rejects(async () => { for await (const _ of streamText({ ...spec, user: "truncate" })) {} }, /token limit/);
+  const truncated = (err) => err instanceof TruncatedError && /token limit/.test(err.message);
+  await assert.rejects(completeText({ ...spec, user: "truncate" }), truncated);
+  await assert.rejects(async () => { for await (const _ of streamText({ ...spec, user: "truncate" })) {} }, truncated);
 });

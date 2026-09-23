@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { planFromAnswers, jevPlan, titleFromURL, defaultPlan } from "../lib/jev.js";
 import { STYLE_KEYS } from "../lib/styles.js";
-import { blockEnd, generatePage, cleanSection, cleanFactLine, paintPictures } from "../lib/pages.js";
+import { blockEnd, generatePage, cleanSection, cleanFactLine, paintPictures, salvageSection } from "../lib/pages.js";
+import { TruncatedError } from "../lib/llm.js";
 
 const args = { url: "https://garden.example/repairs", title: "Gardeners", snippet: "Repairs for greenhouses" };
 const plan = planFromAnswers(args, { kind: { choice: "forum" }, style: { choice: "phpbb" } });
@@ -224,4 +225,54 @@ test("anything a model writes after its section closes never reaches the page", 
   const html = chunks.join("");
   assert.match(html, /<p>ok<\/p><\/section>/);
   assert.doesNotMatch(html, /Need 80|again/);
+});
+
+test("a section is done at its closing tag: a model that runs on can't hold up or fail the page", { timeout: 5000 }, async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let drained = 0;
+  const stream = () => (async function* () {
+    yield "<section><h2>A</h2><p>ok</p></sec";
+    yield "tion>";
+    await gate; // the model is still writing
+    yield "\n \n \n<style>section{}</style><section>again</section>";
+    drained++;
+    throw new TruncatedError();
+  })();
+  const chunks = [];
+  for await (const c of generatePage(args, { looks: new Map(), facts: noFacts, planWithJev: async () => plan, stream })) chunks.push(c);
+  const html = chunks.join("");
+  assert.equal((html.match(/<section><h2>A<\/h2><p>ok<\/p><\/section>/g) ?? []).length, 4);
+  assert.match(html, /<\/html>$/);
+  assert.doesNotMatch(html, /<style>section|again/);
+  // The rest of each reply is still read, so its cost is counted, and its error goes nowhere.
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(drained, 4);
+});
+
+test("a section cut off by the token limit keeps its whole blocks and is closed there", async () => {
+  assert.equal(salvageSection('<section><h2>T</h2><div class="grid"><div class="card"><h3>A</h3></div><div class="card"><h3>B'), '<section><h2>T</h2><div class="grid"><div class="card"><h3>A</h3></div></div></section>');
+  assert.equal(salvageSection("<section><h2>T</h2><table><tbody><tr><td>1</td></tr><tr><td>2"), "<section><h2>T</h2><table><tbody><tr><td>1</td></tr></tbody></table></section>");
+  assert.equal(salvageSection('<section><h2>T</h2><form data-calc><label>Bill'), ""); // only the heading was whole
+  // Live or finished in the background, the page ends up the same and is complete.
+  const cut = ['<section><h2>First</h2><p>one</p></section>', '<section><h2>T</h2><p>kept</p><ul><li>a</li><li>b', '<section><h2>T</h2><p>kept</p><ul><li>a</li><li>b'];
+  const stream = (spec) => (async function* () {
+    const i = Number(spec.user.match(/Write section (\d)/)[1]) - 1;
+    yield cut[i] ?? "<section><p>last</p></section>";
+    if (cut[i] && !cut[i].endsWith("</section>")) throw new TruncatedError();
+  })();
+  const chunks = [];
+  for await (const c of generatePage(args, { looks: new Map(), facts: noFacts, planWithJev: async () => plan, stream })) chunks.push(c);
+  const html = chunks.join("");
+  assert.equal((html.match(/<section><h2>T<\/h2><p>kept<\/p><ul><li>a<\/li><\/ul><\/section>/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /<li>b/);
+  assert.match(html, /<p>last<\/p><\/section>[\s\S]*<\/html>$/);
+});
+
+test("a truncated section with nothing whole but its heading still fails the page", async () => {
+  const stream = () => (async function* () { yield '<section><h2>Estimate</h2><form data-calc><label>Bill <input name="bill">'; throw new TruncatedError(); })();
+  await assert.rejects(async () => {
+    for await (const _ of generatePage(args, { looks: new Map(), facts: noFacts, planWithJev: async () => ({ ...plan, secs: plan.secs.slice(0, 1) }), stream })) { /* exhaust */ }
+  }, /token limit/);
 });
