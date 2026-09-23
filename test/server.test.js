@@ -31,6 +31,9 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
       if (system.includes("image index")) {
         return sse(JSON.stringify({caption:"Greenhouse frame plans",site:"panes.example",path:"/plans",style:"blueprint",shape:"tall",image:"greenhouse frame side elevation"}) + "\\n");
       }
+      if (system.includes("visitor's comment")) {
+        return Response.json({choices:[{message:{content:"crumbkate: Rye first, then bread flour."},finish_reason:"stop"}]});
+      }
       if (p.stream) {
         return sse(JSON.stringify({site:"Gardeners Guild",title:"Gardeners",url:"https://garden.example/repairs",snippet:"Greenhouse repairs",kind:"forum",meta:"4.8★ · 212 reviews"}) + "\\n");
       }
@@ -112,4 +115,36 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   const cached = await (await fetch(url)).text();
   assert.match(cached, /Section 4/);
   assert.ok(!output.includes("SECTION_CALL=5"));
+
+  // Generated pages may run only Foogle's scripts, and load its runtime.
+  const res = await fetch(url);
+  assert.match(res.headers.get("content-security-policy"), /script-src 'self' 'unsafe-hashes' 'sha256-/);
+  assert.match(await res.text(), /<script src="\/fw\/widgets\.js\?v=\w+" async>/);
+  assert.equal((await fetch(`${base}/fw/widgets.js`)).status, 200);
+
+  // A visitor's cart follows their cookie; checkout answers with a receipt page.
+  const first = await fetch(`${base}/fw/state?site=garden.example&page=/garden.example/repairs`);
+  const cookie = first.headers.get("set-cookie").split(";")[0];
+  assert.match(cookie, /^fv=[a-f0-9]{16}$/);
+  const post = (path, body) => fetch(base + path, { method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+  assert.equal((await post("/fw/cart", { site: "garden.example", add: { name: "Glass pane", price: "$38" } })).cart[0].qty, 1);
+  await post("/fw/cart", { site: "garden.example", add: { name: "Glass pane", price: "$38" } });
+  const order = await fetch(`${base}/web/garden.example/checkout`, { method: "POST", headers: { cookie }, body: new URLSearchParams({ name: "Ada", email: "ada@garden.example", _intent: "checkout" }), redirect: "manual" });
+  assert.equal(order.status, 303);
+  const receiptURL = order.headers.get("location");
+  assert.match(receiptURL, /^\/web\/garden\.example\/checkout\?order=\d+$/);
+  const receipt = await (await fetch(base + receiptURL)).text();
+  assert.match(receipt, /<title>Order #\d+ confirmed/);
+  assert.match(receipt, /<td>Glass pane<\/td><td class="num">2<\/td><td class="num">\$76<\/td>/);
+  assert.equal((await (await fetch(`${base}/fw/state?site=garden.example`, { headers: { cookie } })).json()).cart.length, 0);
+
+  // Comments persist on the page, and someone answers.
+  const { comment } = await post("/fw/comments", { page: "/garden.example/repairs", parent: "p1", name: "ada", text: "Rye or bread flour?" });
+  assert.equal(comment.parent, "p1");
+  let comments = [];
+  for (let i = 0; i < 50 && comments.length < 2; i++) {
+    comments = (await (await fetch(`${base}/fw/comments?page=/garden.example/repairs`)).json()).comments;
+    await new Promise(r => setTimeout(r, 20));
+  }
+  assert.deepEqual(comments.map(c => [c.name, c.bot]), [["ada", false], ["crumbkate", true]]);
 });
