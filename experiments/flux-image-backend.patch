@@ -1,0 +1,110 @@
+diff --git a/lib/images.js b/lib/images.js
+index a7d1d25..e8252e8 100644
+--- a/lib/images.js
++++ b/lib/images.js
+@@ -149,6 +149,23 @@ export const STYLES = {
+   },
+ };
+ 
++// ---------- raster pictures (FOOGLE_IMAGE_BACKEND=flux, experimental) ----------
++// A diffusion model (FLUX.2 klein) paints these media far better than an SVG
++// can, photos above all. Media made of words (charts, diagrams, screenshots,
++// blueprints, maps) stay SVGs: their labels come out garbled when painted.
++export const RASTER_STYLES = new Set(["photo", "snapshot", "product", "render3d", "flat", "line", "woodcut", "watercolor", "painting", "isometric", "pixel", "meme", "poster", "collage", "sticker", "neon", "scan"]);
++
++// The prompt for a painted picture: the medium, the description, its light or
++// colour scheme, and the site's palette (FLUX.2 reads hex colours).
++export function rasterPrompt({ description, style, palette }) {
++  const st = STYLES[style];
++  const medium = st.brief.split(/(?<=[.:])\s/)[0].replace(/[:.]$/, "");
++  const scheme = !palette && st.free ? ` Colour scheme: ${pick(COLOR_SCHEMES, `${style} ${description}`)}.` : "";
++  const light = LIT.has(style) ? ` Light: ${pick(LIGHTS, description)}.` : "";
++  const colours = palette && !["photo", "snapshot", "scan"].includes(style) ? ` Colour palette: ${palette.fg} as the accent, ${palette.bg} for the background.` : "";
++  return `${st.label}. ${description}. Medium: ${medium}.${scheme}${light}${colours} ${st.text ? "Any words in it are short and legible." : "No text, no captions, no watermark."}`;
++}
++
+ // What a news story's thumbnail can be.
+ export const NEWS_STYLES = ["photo", "snapshot", "chart", "map", "scan", "screenshot", "diagram"];
+ 
+diff --git a/lib/llm.js b/lib/llm.js
+index fa68e67..ba6c585 100644
+--- a/lib/llm.js
++++ b/lib/llm.js
+@@ -1,5 +1,5 @@
+ import OpenAI from "openai";
+-import { imageMessages } from "./images.js";
++import { imageMessages, rasterPrompt, RASTER_STYLES } from "./images.js";
+ import { OFFLINE, devModel, devClient } from "./fake-llm.js";
+ 
+ // Trim whitespace/quotes that sneak in via .env editing; reject the
+@@ -226,7 +226,35 @@ export function draftSVG(text) {
+ // The brief — medium, canvas, palette — comes from lib/images.js. On GPT-6
+ // Luna a picture takes ~3-6s depending on the medium (see EXPERIMENTS.md).
+ // Returns { mime, buf }.
+-export const generateImage = (spec, opts) => drawSVG(imageMessages(spec), opts);
++// FOOGLE_IMAGE_BACKEND=flux (experimental): media in RASTER_STYLES are painted
++// by FLUX.2 klein 4B instead, ~3.5s and $0.014 a picture (28x an SVG), and
++// fall back to an SVG if that fails. Fake and replay modes always draw SVGs.
++export const IMAGE_BACKEND = OFFLINE ? "svg" : process.env.FOOGLE_IMAGE_BACKEND || "svg";
++export const generateImage = (spec, opts) =>
++  IMAGE_BACKEND === "flux" && RASTER_STYLES.has(spec.style)
++    ? paint(spec, opts).catch((err) => {
++      console.warn(`[image] flux failed (${err.message}); drawing an SVG`);
++      return drawSVG(imageMessages(spec), opts);
++    })
++    : drawSVG(imageMessages(spec), opts);
++
++const RATIOS = { square: "1:1", landscape: "4:3", wide: "16:9", portrait: "3:4", tall: "2:3" };
++function paint(spec, { ticket = { urgent: true } } = {}) {
++  return withImageSlot(async () => {
++    const r = await fetch("https://openrouter.ai/api/v1/images", {
++      method: "POST",
++      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
++      body: JSON.stringify({ model: "black-forest-labs/flux.2-klein-4b", prompt: rasterPrompt(spec), aspect_ratio: RATIOS[spec.shape], resolution: "512", output_format: "jpeg" }),
++      signal: AbortSignal.timeout(30_000),
++    });
++    const j = await r.json().catch(() => ({}));
++    if (!r.ok) throw new Error(j.error?.message ?? `HTTP ${r.status}`);
++    reportUsage(j.usage);
++    const d = j.data?.[0];
++    if (!d?.b64_json) throw new Error("no image in the reply");
++    return { mime: d.media_type || "image/jpeg", buf: Buffer.from(d.b64_json, "base64") };
++  }, ticket);
++}
+ 
+ // Any SVG from a { system, user } prompt, in an image slot, repaired and
+ // sanitized (see draftSVG). The Foogle Doodle (lib/doodle.js) brings its own
+diff --git a/server.js b/server.js
+index 7d2002c..637b799 100644
+--- a/server.js
++++ b/server.js
+@@ -3,7 +3,7 @@ import path from "node:path";
+ import fs from "node:fs/promises";
+ import { createHash } from "node:crypto";
+ import { fileURLToPath } from "node:url";
+-import { streamText, completeText, generateImage, extractJSON, config, onUsage, FAST_ROUTE } from "./lib/llm.js";
++import { streamText, completeText, generateImage, extractJSON, config, onUsage, FAST_ROUTE, IMAGE_BACKEND } from "./lib/llm.js";
+ import { imageSpec, imageKey, imageQuery, sketchCSS, fadeIn, SHAPES, NEWS_STYLES } from "./lib/images.js";
+ import {
+   mapsResultsPrompt, timelineResultsPrompt, searchShardPrompt, newsShardPrompt, imageShardPrompt, overviewPrompt,
+@@ -865,8 +865,9 @@ function normalizeImagePrompt(raw) {
+ const IMG_DIR = process.env.FOOGLE_IMAGE_CACHE || path.join(__dirname, ".foogle-cache", "images");
+ await fs.mkdir(IMG_DIR, { recursive: true }).catch((err) => console.warn(`[image] disk cache unavailable:`, err.message));
+ 
++// Painted pictures (FOOGLE_IMAGE_BACKEND) are kept apart from drawn ones.
+ const imgFile = (prompt) =>
+-  path.join(IMG_DIR, createHash("sha1").update(`svg|${config.model}|${prompt}`).digest("hex"));
++  path.join(IMG_DIR, createHash("sha1").update(`${IMAGE_BACKEND}|${config.model}|${prompt}`).digest("hex"));
+ 
+ async function diskGetImage(prompt) {
+   try {
+@@ -954,7 +955,8 @@ app.use("/img", async (req, res) => {
+     const img = await getImage(spec);
+     res.setHeader("Content-Type", img.mime);
+     res.setHeader("Cache-Control", "public, max-age=86400");
+-    res.send(Buffer.from(fadeIn(img.buf)));
++    // Only an SVG can carry its own fade; a painted picture is sent as is.
++    res.send(img.mime === "image/svg+xml" ? Buffer.from(fadeIn(img.buf)) : img.buf);
+   } catch (err) {
+     console.error(`[image] failed:`, err.message);
+     res.setHeader("Content-Type", "image/svg+xml");
