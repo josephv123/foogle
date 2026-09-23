@@ -59,6 +59,9 @@ const PAGES = [
   { name: "forum", path: web("crumbforum.net/t/starter-smells-like-nail-polish", { q: "sourdough starter", title: "Starter smells like nail polish — help?", kind: "forum" }) },
   { name: "news-site", path: web("harborledger.news/2026/09/harbor-festival-returns", { q: "harbor festival", title: "Harbor Festival Returns After Six Years", kind: "news" }) },
   { name: "wiki", path: web("fogpedia.org/wiki/fog-signal", { q: "fog signals", title: "Fog signal", kind: "wiki" }) },
+  // A search naming a real site, and that site's own look (lib/brands.js).
+  { name: "known-search", path: "/search?q=cnn" },
+  { name: "known-site", path: web("en.wikipedia.org/wiki/Octopus", { q: "wikipedia octopus", title: "Octopus - Wikipedia" }) },
   // With the fake model, a style named in the URL is the one the site gets.
   { name: "zine-retro", path: web("staticbloom.net/web1996/issue-12", { q: "cassette culture", title: "Static Bloom #12: Tape Hiss Forever", kind: "zine" }) },
   { name: "startup-calc", path: web("sunpatch.energy/solar-savings-calculator", { q: "solar savings", title: "Solar Savings Calculator", kind: "startup" }), steps: [{ select: ["[data-calc] select", "2"] }, { check: "[data-calc] input[type=checkbox]" }] },

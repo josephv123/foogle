@@ -11,6 +11,8 @@ import { themeCSS, themeHeader, themeFooter, heroFacts, artColors } from "../lib
 import { generatePage } from "../lib/pages.js";
 import { planFromAnswers } from "../lib/jev.js";
 import { searchShardPrompt, pageSectionPrompt } from "../lib/prompts.js";
+import { brandSpecPrompt } from "../lib/brands.js";
+import { fakeReply } from "../lib/fake-fixtures.js";
 
 const CSS_COLOR = /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([\d.,% ]+\))$/i;
 const noFacts = async function* () {};
@@ -125,6 +127,10 @@ test("a model's brand spec is checked before it can reach a page", () => {
   assert.equal(parseBrandSpec('{"known": false}', "crumbforum.net"), null);
   assert.equal(parseBrandSpec("not json", "x.example"), null);
   assert.equal(parseBrandSpec({ known: true, name: "Odd", arch: "blog" }, "odd.example").arch, "landing");
+  // Fake mode answers the prompt in the format it asks for.
+  const fake = (d) => { const p = brandSpecPrompt(d); return parseBrandSpec(fakeReply(p.system, p.user), d); };
+  assert.ok(ARCHES.includes(fake("letterboxd.com").arch));
+  assert.equal(fake("garden.example"), null);
   const plan = brandPlan({ url: "https://letterboxd.com/film/some-film/" }, spec);
   assert.doesNotMatch(themeCSS(plan) + themeHeader(plan, "letterboxd.com"), /<script|undefined/);
 });
