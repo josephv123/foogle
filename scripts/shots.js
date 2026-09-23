@@ -84,6 +84,17 @@ const PAGES = [
       { fill: [".fw-checkout [name=name]", "Ada Moss"] }, { fill: [".fw-checkout [name=email]", "ada@example.com"] }, { fill: [".fw-checkout [name=address]", "1 Pier Rd, Port Avery"] },
       { click: ".fw-checkout button[type=submit]" }, { url: "order=" }, { wait: ".fw-receipt" }],
   },
+  // Instant answers above the results, each put through its interaction.
+  { name: "answer-weather", path: "/search?q=weather%20tokyo", steps: [{ click: ".ia-wx-day >> nth=2" }, { wait: ".ia-wx-day[aria-selected=true] >> nth=0" }] },
+  { name: "answer-calc", path: "/search?q=17%25%20of%202340", steps: [{ click: "[data-k='7']" }, { click: "[data-k='*']" }, { click: "[data-k='6']" }, { click: "[data-k='=']" }, { wait: ".ia-calc-main:text-is('42')" }] },
+  { name: "answer-units", path: "/search?q=5%20miles%20in%20km", steps: [{ fill: [".ia-num >> nth=0", "26.2"] }, { select: [".ia-unit >> nth=1", "meter"] }] },
+  { name: "answer-currency", path: "/search?q=500%20lunar%20credits%20in%20usd", steps: [{ click: "[data-tab='1Y']" }] },
+  { name: "answer-stock", path: "/search?q=NVDA%20stock", steps: [{ click: "[data-tab='1Y']" }, { wait: ".ia-stock-change:has-text('past year')" }] },
+  { name: "answer-dict", path: "/search?q=define%20serendipity", steps: [{ click: ".ia-more" }] },
+  { name: "answer-time", path: "/search?q=time%20in%20lagos", steps: [{ wait: ".ia-time-rel:not(:empty)" }] },
+  { name: "answer-sports", path: "/search?q=lakers%20score" },
+  { name: "answer-flight", path: "/search?q=flight%20UA%20902" },
+  { name: "didyoumean", path: "/search?q=recieve%20package", steps: [{ wait: ".dym-line" }] },
 ];
 const VIEWPORTS = {
   desktop: { viewport: { width: 1280, height: 800 } },
