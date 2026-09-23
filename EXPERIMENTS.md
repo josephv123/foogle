@@ -218,6 +218,74 @@ Measured 2026-09-23 on cold Images pages in Chromium at 1280×800, with the same
 
 Each picture reached the screen within 0.1s of the server finishing it, so sending it whole costs nothing: the time is all drawing. An hour later the providers were slower for everyone, and five alternating pairs of cold pages against the previous code (the multipart stream) drew at the same speed: the median picture took 7.1-9.2s there and 7.6-8.0s here, and neither side was ahead once the order was swapped.
 
+## Diffusion models: text and pictures — 2026-09-23
+
+Do diffusion models help anywhere? Text diffusion LLMs (Inception's Mercury 2 and 2.5, the only ones on OpenRouter) were tried on page sections, result shards, suggestions and site specs, and image models on pictures. Everything went through OpenRouter (there are no fal, Replicate or Together keys), with Foogle's own prompt builders, so every model got exactly the prompts Luna gets. About $0.73 of calls. Nothing was adopted; the FLUX prototype is kept as a patch.
+
+**Text: Mercury against Luna.** Mercury returns a reply in 3-13 big chunks where Luna streams ~400, so a section lands in one or two bursts: pages finish much sooner, but the first words arrive no sooner. It needs `reasoning: {enabled: false}` (Foogle sends it; without it Mercury 2.5 spent all 800 tokens thinking and wrote nothing).
+
+| Use | Model | First output p50 | Done p50 (p90) | $ | Quality and format |
+|---|---|---:|---:|---:|---|
+| Page sections, 12 pages | Luna | 1.5s | 6.5s (8.3s) | $0.0017/page | 0/48 sections failed; 21/24 pictures asked for; no invented classes |
+| | Mercury 2.5 | 1.5s | 2.6s (3.4s) | $0.0005/page | 5/48 failed with an Inception 502 (5 of 12 pages lost a section); 3/19 pictures; invented classes in 5; thinner (93 words p50 against 133), odd facts ("120°F room temp") |
+| Page sections, 4 pages | Mercury 2 | 1.3s | 2.4s (2.8s) | $0.0024/page | 0/16 failed; 3/8 pictures; runs long (up to 256 words) and repeats other sections |
+| Search shards, 4 queries × 3 | Luna | 1.7s | 4.7s | $0.00065/page | 40/42 lines follow the field rules |
+| | Mercury 2.5 | 1.2s | 1.8s | $0.00019/page | one 502 in 12 shards; generic sites, titles that echo the query |
+| | Mercury 2 | 1.0s | 1.4s | $0.00087/page | 2/12 shards not one object per line |
+| Images shards, 2 queries × 3 | Luna / Mercury 2.5 / 2 | 1.9 / 0.8 / 0.6s | 5.0 / 1.6 / 1.1s | $0.00055 / 0.00018 / 0.00074 | all 24/24 valid; Mercury's captions formulaic ("Sticker design: …") |
+| Suggestions, 10 prefixes | Llama 8B / 70B (Groq) / Mercury 2 / 2.5 | 161 / 270 / 613 / 777ms | 305 / 524 / 643 / 827ms | $0.00002 / 0.00024 / 0.00009 / 0.00002 a list | all usable; Mercury 2's the most futuristic |
+| Site specs: cnn, reddit, letterboxd | Luna | look 2.3-3.3s | 6.6-13.3s | $0.0006-0.001 | closest to the real brands |
+| | Mercury 2.5 / 2 | look 0.6-0.9s | 1.6-2.7s | $0.0003 / 0.001-0.002 | wrong looks (a sports ticker on CNN, Reddit and Letterboxd; Letterboxd light), nav pairs flattened into labels ("/popular"), the CSS line missing on 2 of 3 |
+
+Side by side, Mercury's sections look about as designed as Luna's, but Luna's content is more specific and more consistent:
+
+![The same store page written by Luna, Mercury 2.5 and Mercury 2](experiments/diffusion/cmp-sections-store.jpg)
+
+**Pictures: image models against SVG.** One cold call each, the same photo prompt, at the smallest size accepted:
+
+| Model | Time | $ a picture | Output |
+|---|---:|---:|---|
+| FLUX.2 klein 4B | 4.9s | $0.014 | 512×384 JPEG, 108KB |
+| Gemini 3.1 Flash Lite Image | 3.8s | $0.034 | 1200×896 JPEG (no smaller size), 284KB |
+| gpt-image-1-mini, low quality | 9.0s | $0.0023-0.0034 | 1024-1536px PNG, 1-3MB |
+| Krea 2 medium turbo, MAI Image 2.6 Flash | 11-12s | $0.015 | ~1MP PNG |
+| Recraft V4.1 vector | 9.9s | $0.08 | a posterised 334KB SVG |
+| Riverflow 2.5 fast, Seedream 5 lite, Grok Imagine 2.0, Qwen Image 3, Ming Image 0.1 | 25-71s | $0-0.06 | |
+
+Every raster model painted a convincing photo; none was under a second (OpenRouter has no SDXL-Turbo or FLUX schnell class model). Meta Muse needs an 18+ confirmation on the account, and Gemini Diffusion isn't on OpenRouter. The two fastest affordable ones, against SVG, on the same 12 Images results for "tide pools" (12 media, all at once):
+
+| 12 pictures at once | First | p50 | p90 | All | $ for 12 | Size |
+|---|---:|---:|---:|---:|---:|---:|
+| SVG (Luna, that hour) | 5.2s | 7.8s | 13.2s | 14.5s | $0.0058 | ~2KB |
+| FLUX.2 klein 4B | 2.4s | 3.4s | 4.0s | 4.5s | $0.168 | ~110KB JPEG; ~16KB as WebP q70 at 480px |
+| gpt-image-1-mini, low quality | 7.6s | 10.1s | 10.4s | 10.7s | $0.037 | ~1.9MB PNG |
+
+klein is far better at photos, snapshots, scans, product shots, watercolour, woodcut, pixel art and posters, and wrote the meme's caption perfectly, but its chart, diagram and blueprint labels are garbled where SVG's are crisp (rows: SVG, klein, gpt-image-1-mini):
+
+![12 media as SVG, FLUX.2 klein and gpt-image-1-mini](experiments/diffusion/styles-svg-klein-mini.jpg)
+
+In Foogle, with the prototype below and the three text media left as SVGs, a cold Images page painted its 9 other pictures in 2.1-4.0s each. The first picture was on screen at 4.3s (7.6s on an all-SVG page) and all 9 by 9.3s; the SVG screenshot still finished last, at ~16s, as on an all-SVG page:
+
+![The same Images results drawn as SVGs and painted by FLUX.2 klein](experiments/diffusion/cmp-images-tide-pools.jpg)
+
+**Verdicts.**
+- Photographic and painterly pictures: adopt as an option, not the default. FLUX.2 klein was faster than SVG and far better at photos, but costs 28 times as much: an Images page goes from ~$0.007 to ~$0.13, and `DAILY_BUDGET_USD=1` pays for ~70 painted pictures a day. Painting only photo, snapshot, product and scan (where SVG is weakest) is a cheaper middle ground.
+- Media made of words (chart, diagram, screenshot, blueprint, map): keep SVG.
+- The Doodle: keep SVG (not tested). Its scene must leave exact room for the letters, and it is drawn once a day, so speed doesn't matter.
+- Page sections: not yet. Mercury 2.5 finishes pages 2.5 times sooner for a third of the price, but its 502s, dropped pictures and thinner content rule it out for now. It may be worth another look on sections 2-4 only, with code placing the pictures.
+- Result shards, suggestions and site specs: no. Generic results, slower than Groq, and the wrong brands.
+
+**The prototype** is [`experiments/flux-image-backend.patch`](experiments/flux-image-backend.patch). Apply it with `git apply experiments/flux-image-backend.patch` and start Foogle with `FOOGLE_IMAGE_BACKEND=flux`. Media in `RASTER_STYLES` are then painted by FLUX.2 klein 4B through OpenRouter's `/images` endpoint (512px JPEG). Their cost goes to the daily budget, and any failure falls back to an SVG (a path that ran live when the account ran out of credit). A painted picture is sent as is, since the SVG's fade-in would corrupt a JPEG, and the disk cache is keyed by backend. Fake and replay modes always draw SVGs. Adopting it for real would also take:
+1. Charging a painted picture ~$0.014 in `lib/limits.js` (it charges $0.0005), and a bigger daily budget or fewer `RASTER_STYLES`.
+2. Serving WebP (~16KB instead of ~110KB), which needs `sharp` or similar.
+3. A fade-in for painted pictures, which pop in instead (the fade lives inside the SVG).
+4. Keeping real people out. Painted news thumbnails look like real photos of invented events: the prompt should ask for invented people only, and pictures could carry a small "AI" label.
+5. A test of the raster path with a stubbed fetch.
+
+**Open questions.**
+- OpenRouter charged $0.014 for a 0.2-megapixel picture, which looks like a one-megapixel minimum. BFL's or fal's own API may bill the real size: fal quotes klein at $0.009 a megapixel with sub-second inference (not verified; needs a `FAL_KEY`), which would beat SVG outright.
+- Site palettes in the raster prompt (as hex colours) and painted pictures on generated sites weren't checked: the account ran out of credit first.
+
 ## Live references
 
 - [OpenRouter model catalog](https://openrouter.ai/api/v1/models) — exact IDs and prices were checked before trials.
