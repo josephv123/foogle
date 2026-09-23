@@ -58,7 +58,8 @@ test("Jev's ratings choose a plausible style, seeded by the domain", () => {
   assert.ok(picks.every((p) => ["phpbb", "web2", "brutalist", "classifieds"].includes(p)), [...new Set(picks)].join());
   assert.ok(new Set(picks).size >= 3);
   // The likeliest style is the commonest.
-  const count = (k) => picks.filter((p) => p === k).length;
+  const many = Array.from({ length: 1000 }, (_, i) => pickStyle(`shop-${i}.example`, ratings, "forum"));
+  const count = (k) => many.filter((p) => p === k).length;
   assert.ok(count("phpbb") > count("classifieds"));
   // A style the kind rarely wears is discounted: a wiki is not a phpBB board
   // just because Jev finds it vaguely plausible.
