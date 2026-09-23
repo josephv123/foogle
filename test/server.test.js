@@ -151,8 +151,9 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   assert.doesNotMatch(page, /class="browser/);
   assert.match(await (await visit("/search?q=greenhouse")).text(), /value="https:\/\/www\.foogle\.com\/search\?q=greenhouse"/);
   assert.match(await (await visit("/")).text(), /<input name="q" value="" placeholder="Search Foogle or type a URL"/);
-  // Known sites for the address bar's suggestions, and a tab's favicon.
-  assert.deepEqual((await (await fetch(`${base}/api/sites?q=cnn`)).json()).rows.map(r => r.target), ["/web/www.cnn.com"]);
+  // A tab's favicon. No list of known sites is served: suggestions come
+  // from /api/suggest.
+  assert.equal((await fetch(`${base}/api/sites?q=cnn`)).status, 404);
   const icon = await fetch(`${base}/api/favicon?url=${encodeURIComponent("/web/www.cnn.com")}`);
   assert.equal(icon.headers.get("content-type"), "image/svg+xml; charset=utf-8");
   assert.match(await icon.text(), /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);

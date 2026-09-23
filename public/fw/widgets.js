@@ -730,7 +730,7 @@
       box.append(t);
     }],
   ];
-  // A contents box (a known site's article, see lib/brandtheme.js) lists the
+  // A contents box (a reference article, see lib/design.js) lists the
   // page's section headings as they stream in.
   function fillToc(toc) {
     const heads = $$("main section > h2");
