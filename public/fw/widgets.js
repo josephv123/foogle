@@ -719,6 +719,18 @@
     // Header cells arrive with their table's head, before the rows stream in.
     ["main thead th", (th) => { if (!th.closest(".fw-receipt, .infobox")) th.classList.add("fw-sortable"); }],
   ];
+  // A contents box (a known site's article, see lib/brandtheme.js) lists the
+  // page's section headings as they stream in.
+  function fillToc(toc) {
+    const heads = $$("main section > h2");
+    if (toc.__fwCount === heads.length) return;
+    toc.__fwCount = heads.length;
+    $$(":scope > a", toc).forEach((a) => a.remove());
+    heads.forEach((h, i) => {
+      h.id ||= `s-${i + 1}-${h.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`;
+      toc.append(el("a", { href: `#${h.id}`, text: `${i + 1} ${h.textContent.replace(/\s*\[edit\]\s*$/, "").trim()}` }));
+    });
+  }
   const seen = new WeakMap();
   let queued = false;
   function scan() {
@@ -733,6 +745,7 @@
       }
     }
     $$("[data-filter]").forEach((g) => g.__fwRefresh?.());
+    $$("[data-toc]").forEach(fillToc);
     if (state.loaded) placeComments();
     if (pageDone()) {
       ensureCommentBox();

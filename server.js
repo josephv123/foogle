@@ -10,6 +10,8 @@ import {
   SEARCH_ANGLES, NEWS_ANGLES, IMAGE_ANGLES,
 } from "./lib/prompts.js";
 import { generatePage } from "./lib/pages.js";
+import { siteForQuery, knownSite, learnSite } from "./lib/brands.js";
+import { siteResult, brandFavicon } from "./lib/brandtheme.js";
 import { siteMark } from "./lib/icons.js";
 import { PAGE_CSP } from "./lib/widgets.js";
 import { browserBar, browserBarRoutes } from "./lib/browserbar.js";
@@ -249,6 +251,11 @@ body { font-family: arial, sans-serif; color: #202124; }
 #shimmer .note { font-size: 13px; color: #70757a; margin-bottom: 18px; }
 @keyframes sh { from { background-position: 200% 0 } to { background-position: -200% 0 } }
 .result .src { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+.bfav { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 50%; background: #f1f3f4; overflow: hidden; }
+.bsl { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 44px; margin: 14px 0 2px 24px; }
+.bsl a { font-size: 18px; color: #1a0dab; text-decoration: none; } .bsl a:hover { text-decoration: underline; }
+.bsl p { font-size: 13px; color: #4d5156; line-height: 1.45; margin-top: 3px; }
+@media (max-width: 700px) { .bsl { grid-template-columns: 1fr; margin-left: 0; } }
 .result .mark { flex-shrink: 0; display: block; }
 .sname { font-size: 14px; color: #202124; line-height: 1.3; }
 .result .src .url { font-size: 12px; color: #4d5156; line-height: 1.3; }
@@ -361,6 +368,35 @@ function renderResultItem(query, r) {
   ${meta ? `<div class="rmeta">${meta}</div>` : ""}${links ? `<div class="sitelinks">${links}</div>` : ""}
 </div>
 `;
+}
+
+// A query that names a real, known site (lib/brands.js) gets that site first,
+// built in code before any model has answered: its home page with Google-style
+// sitelinks, or the page on it the query asks for ("reddit sourdough").
+function renderSiteResult(query, hit) {
+  const r = siteResult(hit);
+  const b = hit.site;
+  const u = new URL(r.url);
+  const href = esc(webHref(query, r));
+  const crumbs = `${esc(u.origin)}${u.pathname.split("/").filter(Boolean).map((p) => ` <span class="crumb">› ${esc(decodeURIComponent(p))}</span>`).join("")}`;
+  const links = r.links.length
+    ? `<div class="bsl">${r.links.slice(0, 6).map(([label, p, note]) => `<div><a href="${esc(webHref(query, { url: siteURL(b.host, p), title: `${label} | ${b.name}` }))}">${esc(label)}</a><p>${esc(note)}</p></div>`).join("")}</div>`
+    : "";
+  return `<div class="result top-site">
+  <a class="src" href="${href}" tabindex="-1">${brandFavicon(b)}<div><div class="sname">${esc(b.name)}</div><div class="url">${crumbs}</div></div></a>
+  <h3><a href="${href}">${esc(r.title)}</a></h3>
+  <div class="snippet">${esc(r.snippet)}</div>${links}
+</div>
+`;
+}
+
+// Start generating a result's page, query string and all.
+function warmResultPage(query, r) {
+  try {
+    const u = new URL(r.url);
+    const search = u.search ? `?${new URLSearchParams(u.search)}` : "";
+    ensurePage(`/${u.host}${u.pathname}`.replace(/\/+$/, "") + search, search, { query, title: r.title, snippet: r.snippet, resultKind: r.kind, real: r.real === true });
+  } catch { /* unparseable url: nothing to warm */ }
 }
 
 // ---------- Foogle Overview (right-hand panel on the All tab) ----------
@@ -485,14 +521,18 @@ function pager(href, query, page) {
 }
 
 // ---------- generic streamed results route ----------
-function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, renderItem, validate, dedupeKey, header = () => "", footer = () => "", paged = false, aside, prefetch }) {
+function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, renderItem, validate, dedupeKey, header = () => "", footer = () => "", paged = false, aside, prefetch, realSites = false }) {
   const shards = shardPrompt ? Math.min(SHARDS, angles.length) : 1;
 
-  const itemStream = (query, page) => {
+  // With realSites, a query naming a known site gets it as a code-built top
+  // result and the shards are told it's taken; otherwise the first shard may
+  // put a real site it recognises first (marked "real").
+  const itemStream = (query, page, known) => {
     if (shards < 2) return streamJSONL(prompt(query, { page }));
+    const real = (i) => (!realSites ? null : known ? { taken: { name: known.site.name, host: known.site.host } } : page === 1 && i === 0 ? "allow" : null);
     return mergeAsync(
       shardCounts(total, shards).map((count, i) =>
-        streamJSONL(shardPrompt(query, { count, angle: angles[i % angles.length], page }), count * 140 + 150),
+        streamJSONL(shardPrompt(query, { count, angle: angles[i % angles.length], page, real: real(i) }), count * 140 + 150),
       ),
     );
   };
@@ -535,30 +575,49 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
       const t0 = Date.now();
       console.log(`[${tab.toLowerCase()}] "${query}"${page > 1 ? ` page ${page}` : ""}${shards > 1 ? ` (${shards} shards)` : ""}`);
       let count = 0;
+      let invented = 0;
       // Shards work from different slices of the web, but they can still land on
       // the same obvious domain — drop the later one so the page never shows a
       // site twice.
       const seen = new Set();
+      const open = () => {
+        console.log(`[${tab.toLowerCase()}] first result +${((Date.now() - t0) / 1000).toFixed(1)}s`);
+        emit(`<style>#shimmer{display:none}</style>\n${header(query, page)}<div class="${container}">`);
+      };
+      const known = realSites && page === 1 ? siteForQuery(query) : null;
+      if (known) {
+        open();
+        emit(renderSiteResult(query, known));
+        seen.add(known.site.host.replace(/^www\./, ""));
+        warmResultPage(query, siteResult(known));
+        count++;
+      }
+      let pinned = false;
       // A model occasionally runs one result line on without ever closing it,
-      // leaving a SERP with nothing on it. While count is 0 nothing has reached
-      // the browser yet, so the ask is safe to repeat verbatim.
-      for (let attempt = 1; count === 0 && attempt <= 2; attempt++) {
+      // leaving a SERP with nothing on it. While nothing invented has reached
+      // the browser, the ask is safe to repeat verbatim.
+      for (let attempt = 1; invented === 0 && attempt <= 2; attempt++) {
         try {
-          for await (const item of itemStream(query, page)) {
+          for await (const item of itemStream(query, page, known)) {
             if (!validate(item)) continue;
             const key = String(dedupeKey?.(item) ?? "").toLowerCase();
             if (key && seen.has(key)) continue;
+            if (known && knownSite(key) === known.site) continue;
             if (key) seen.add(key);
-            if (count === 0) {
-              console.log(`[${tab.toLowerCase()}] first result +${((Date.now() - t0) / 1000).toFixed(1)}s`);
-              emit(`<style>#shimmer{display:none}</style>\n${header(query, page)}<div class="${container}">`);
-            }
-            emit(renderItem(query, item, count));
-            if (count < PREFETCH_PAGES) prefetch?.(query, item);
+            // A real site the model recognised goes to the top, even if other
+            // results got there first; its brand spec starts now.
+            const real = item.real === true && realSites && !known && !pinned;
+            if (item.real !== true || !real) delete item.real;
+            if (count === 0) open();
+            if (real && count > 0) emit(`<template id="frt">${renderItem(query, item, count)}</template><script>(()=>{const t=document.getElementById("frt");document.querySelector(".${container}").prepend(t.content);t.remove()})()</script>\n`);
+            else emit(renderItem(query, item, count));
+            if (real) { pinned = true; learnSite(key); warmResultPage(query, item); }
+            else if (count < PREFETCH_PAGES) prefetch?.(query, item);
             count++;
+            invented++;
           }
         } catch (err) {
-          if (count > 0 || attempt === 2) throw err;
+          if (invented > 0 || attempt === 2) throw err;
           console.warn(`[${tab.toLowerCase()}] ${err.message} — retrying`);
         }
       }
@@ -604,12 +663,15 @@ app.get("/search", async (req, res, next) => {
   if (req.query.lucky !== "1") return next();
   const query = String(req.query.q ?? "").trim() || LUCKY_QUERIES[Math.floor(Math.random() * LUCKY_QUERIES.length)];
   if (!config.apiKey) return res.status(500).send(setupPage());
+  // A query naming a known site goes straight there, like the real thing.
+  const known = siteForQuery(query);
+  if (known) return res.redirect(webHref(query, siteResult(known)));
   if (!limits.allow(req, res, "lucky")) return;
   try {
     console.log(`[lucky] "${query}"`);
     // Only the first result is ever used, so ask for exactly one rather than
     // generating nine and throwing eight away.
-    for await (const r of streamJSONL(searchShardPrompt(query, { count: 1, angle: SEARCH_ANGLES[0] }), 300)) {
+    for await (const r of streamJSONL(searchShardPrompt(query, { count: 1, angle: SEARCH_ANGLES[0], real: "allow" }), 300)) {
       if (r.url && r.title) return res.redirect(webHref(query, r));
     }
     throw new Error("no results returned");
@@ -646,6 +708,7 @@ app.get(
         ensurePage(`/${u.host}${u.pathname}`.replace(/\/+$/, ""), "", { query, title: r.title, snippet: r.snippet, resultKind: r.kind });
       } catch { /* unparseable url: nothing to warm */ }
     },
+    realSites: true,
   }),
 );
 
@@ -938,7 +1001,7 @@ app.use("/web", async (req, res) => {
 
 // Join the live generation of a page, or start one. Shared by visits, hover
 // warming and search-result prefetch, so a page is only ever generated once.
-function ensurePage(webPath, search, { query, title, snippet, resultKind, submission }) {
+function ensurePage(webPath, search, { query, title, snippet, resultKind, submission, real }) {
   const existing = inflight.get(webPath);
   if (existing || pageCache.has(webPath)) return existing;
   const domain = webPath.split("/")[1];
@@ -946,7 +1009,7 @@ function ensurePage(webPath, search, { query, title, snippet, resultKind, submis
   if (!context && !submission && (query || title)) siteContext.set(domain, { query, title });
   const pathname = webPath.slice(domain.length + 1, webPath.length - search.length);
   const url = `https://${domain}${pathname || "/"}${search}`;
-  return startPageGeneration(webPath, { url, query, title, snippet, resultKind, siteContext: context, submission });
+  return startPageGeneration(webPath, { url, query, title, snippet, resultKind, siteContext: context, submission, real });
 }
 
 const listener = app.listen(PORT, () => {
