@@ -6,6 +6,7 @@ import { pageSectionPrompt } from "../lib/prompts.js";
 import { generatePage } from "../lib/pages.js";
 import { planFromAnswers, questions } from "../lib/jev.js";
 import { themeCSS, themeHeader, themeFooter } from "../lib/theme.js";
+import { STYLE_KEYS } from "../lib/styles.js";
 
 test("model HTML cannot run code: scripts go inert, handlers and script URLs are dropped", () => {
   const out = sanitizeSection(`<section><script>steal()</script><img src="/img/x" onerror="steal()"><a href="javascript:steal()">a</a><a href=" jav&#x61;script:steal()">b</a><iframe srcdoc="<b>"></iframe><style>body{}</style><button onclick='x()' data-add-to-cart data-price="4">Add</button><form action="data:text/html,x"><input formaction="javascript:x"></form></section>`);
@@ -42,8 +43,8 @@ test("sanitizing is stable as a section streams in, so sent offsets stay valid",
 test("every inline handler the theme writes is allowed by the page CSP, and nothing else is", () => {
   const allowed = new Set(THEME_INLINE_HANDLERS.map((h) => `'sha256-${createHash("sha256").update(h).digest("base64")}'`));
   for (const kind of Object.keys(questions.kind.criteria)) {
-    for (const mood of Object.keys(questions.mood.criteria)) {
-      const plan = planFromAnswers({ url: `https://${kind}-${mood}.example/page`, title: "A page", snippet: "About it" }, { kind: { choice: kind }, mood: { choice: mood } });
+    for (const style of STYLE_KEYS) {
+      const plan = planFromAnswers({ url: `https://${kind}-${style}.example/page`, title: "A page", snippet: "About it" }, { kind: { choice: kind }, style: { choice: style } });
       const html = themeCSS(plan) + themeHeader(plan, "x.example", { art: true }) + themeFooter(plan, "x.example");
       assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)/i, "the theme writes no inline scripts");
       for (const [, , code] of html.matchAll(/\son(\w+)="([^"]*)"/g)) {

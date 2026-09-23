@@ -68,7 +68,7 @@ dialog.fw-drawer[open] { animation: fw-slide .25s ease-out; }
 .fw-subtotal { display: flex; justify-content: space-between; font-size: 1.1rem; margin: 6px 0 18px; }
 .fw-checkout { display: flex; flex-direction: column; gap: 10px; }
 .fw-checkout .btn { width: 100%; text-align: center; margin-top: 6px; }
-.fw-cartfab { position: fixed; right: 22px; bottom: 22px; z-index: 2147482000; background: var(--acc); color: var(--bg); border: 0; border-radius: 999px; padding: 12px 18px; font: 700 .95rem/1 inherit; box-shadow: 0 6px 20px rgba(0,0,0,.25); cursor: pointer; }
+.fw-cartfab { position: fixed; right: 22px; bottom: 22px; z-index: 2147482000; background: var(--acc); color: var(--on, var(--bg)); border: 0; border-radius: 999px; padding: 12px 18px; font: 700 .95rem/1 inherit; box-shadow: 0 6px 20px rgba(0,0,0,.25); cursor: pointer; }
 .fw-bump { display: inline-block; animation: fw-bump .45s ease-out; }
 @keyframes fw-bump { 40% { transform: scale(1.25); color: var(--acc); } }
 .fw-added { filter: saturate(1.3); }
@@ -89,7 +89,7 @@ dialog.fw-drawer[open] { animation: fw-slide .25s ease-out; }
 .fw-filterbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 14px; }
 .fw-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
 main .fw-chip, .fw-chip { border-radius: 999px !important; padding: .3em .85em !important; font-size: .8rem !important; text-transform: capitalize; }
-.fw-chip[aria-pressed=true] { background: var(--acc) !important; border-color: var(--acc) !important; color: var(--bg) !important; }
+.fw-chip[aria-pressed=true] { background: var(--acc) !important; border-color: var(--acc) !important; color: var(--on, var(--bg)) !important; }
 .fw-filterbar input[type=search] { flex: 0 1 180px; padding: .4em .7em !important; font-size: .85rem !important; }
 .fw-filterbar select { font-size: .85rem !important; padding: .4em .6em !important; }
 .fw-count { white-space: nowrap; }
@@ -108,7 +108,7 @@ main .fw-chip, .fw-chip { border-radius: 999px !important; padding: .3em .85em !
 .fw-opt.fw-right::after { content: " ✓"; }
 .fw-opt.fw-wrong { background: hsla(0, 70%, 55%, .14) !important; border-color: hsl(0, 65%, 50%) !important; }
 .fw-opt.fw-wrong::after { content: " ✗"; }
-.fw-opt.fw-chosen { border-color: var(--acc) !important; background: var(--acc) !important; color: var(--bg) !important; }
+.fw-opt.fw-chosen { border-color: var(--acc) !important; background: var(--acc) !important; color: var(--on, var(--bg)) !important; }
 [data-q].fw-done .fw-opt { cursor: default; }
 .fw-score { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; animation: fw-up .3s; }
 
@@ -130,9 +130,9 @@ main .fw-chip, .fw-chip { border-radius: 999px !important; padding: .3em .85em !
 [data-calc] .progress::after { transition: width .35s ease-out; animation: none; }
 
 /* ---------- pick one, toggles ---------- */
-[data-pick] button[aria-pressed=true] { background: var(--acc) !important; border-color: var(--acc) !important; color: var(--bg) !important; }
+[data-pick] button[aria-pressed=true] { background: var(--acc) !important; border-color: var(--acc) !important; color: var(--on, var(--bg)) !important; }
 [data-toggle][aria-pressed=true]:not(.btn) { border-color: var(--acc); color: var(--acc); }
-.btn.ghost[data-toggle][aria-pressed=true] { background: var(--acc); color: var(--bg); }
+.btn.ghost[data-toggle][aria-pressed=true] { background: var(--acc); color: var(--on, var(--bg)); }
 
 /* ---------- posts: votes, replies, comments ---------- */
 .fw-vote, .fw-reply { background: none; border: var(--bw, 1px) solid transparent; border-radius: 999px; padding: .12em .55em; margin: 0 -.2em; font: inherit; color: inherit; cursor: pointer; transition: color .15s, background .15s, border-color .15s; }
