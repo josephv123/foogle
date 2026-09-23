@@ -1,23 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { planFromAnswers, jevPlan, titleFromURL, defaultPlan } from "../lib/jev.js";
+import { STYLE_KEYS } from "../lib/styles.js";
 import { blockEnd, generatePage, cleanSection, cleanFactLine, paintPictures } from "../lib/pages.js";
 
 const args = { url: "https://garden.example/repairs", title: "Gardeners", snippet: "Repairs for greenhouses" };
-const plan = planFromAnswers(args, { kind: { choice: "forum" }, mood: { choice: "light" } });
+const plan = planFromAnswers(args, { kind: { choice: "forum" }, style: { choice: "phpbb" } });
 const noFacts = async function* () {};
 
 test("Jev plans preserve context and use a stable domain palette", () => {
   assert.equal(plan.kind, "forum");
   assert.ok(plan.secs.every(s => s.includes(args.snippet)));
-  assert.equal(plan.hue, planFromAnswers({ ...args, url: "https://garden.example/other" }, { kind: { choice: "store" }, mood: { choice: "dark" } }).hue);
+  assert.equal(plan.hue, planFromAnswers({ ...args, url: "https://garden.example/other" }, { kind: { choice: "store" }, style: { choice: "saas" } }).hue);
   assert.throws(() => planFromAnswers(args, { kind: { choice: "invalid" } }), /Invalid Jev/);
 });
 
 test("Jev pages are named by their domain; the clicked result titles the page, not the site", () => {
   assert.equal(plan.site, "garden.example");
   assert.equal(plan.title, "Gardeners");
-  const inner = planFromAnswers({ url: "https://garden.example/field-notes/fog-signals" }, { kind: { choice: "blog" }, mood: { choice: "paper" } });
+  const inner = planFromAnswers({ url: "https://garden.example/field-notes/fog-signals" }, { kind: { choice: "blog" }, style: { choice: "editorial" } });
   assert.equal(inner.title, "Fog Signals");
   assert.equal(inner.tag, "");
   assert.equal(titleFromURL("https://shop.example/search?q=brass+lamps"), "Search — “brass lamps”");
@@ -28,11 +29,14 @@ test("Jev sends the documented request and rejects provider failures", async () 
   const actual = await jevPlan(args, { apiKey: "test", fetchImpl: async (url, init) => {
     assert.equal(url, "https://api.typesafe.ai/v1/systemone");
     sent = JSON.parse(init.body);
-    return { ok: true, json: async () => ({ answers: { kind: { choice: "forum" }, mood: { choice: "light" } } }) };
+    // One yes/no rating per style; phpbb is the only plausible one here.
+    const ratings = Object.fromEntries(STYLE_KEYS.map((k) => [`style_${k}`, { type: "noul", noul: k === "phpbb" ? 0.9 : 0.1 }]));
+    return { ok: true, json: async () => ({ answers: { kind: { choice: "forum" }, ...ratings } }) };
   } });
   assert.deepEqual(actual, plan);
   assert.equal(sent.model, "jev-latest");
-  assert.deepEqual(Object.keys(sent.questions), ["kind", "mood"]);
+  assert.deepEqual(Object.keys(sent.questions), ["kind", ...STYLE_KEYS.map((k) => `style_${k}`)]);
+  assert.ok(Object.values(sent.questions).slice(1).every((q) => q.type === "noul"));
   await assert.rejects(jevPlan(args, { apiKey: "test", fetchImpl: async () => ({ ok: false, status: 429 }) }), /Jev HTTP 429/);
 });
 
@@ -94,7 +98,7 @@ test("Jev failure falls back to a default layout from the clicked result's kind"
 test("later pages on a site reuse its first page's look without re-planning", async () => {
   const looks = new Map();
   let jevCalls = 0;
-  const planWithJev = async (a) => { jevCalls++; return planFromAnswers(a, { kind: { choice: "zine" }, mood: { choice: "neon" } }); };
+  const planWithJev = async (a) => { jevCalls++; return planFromAnswers(a, { kind: { choice: "zine" }, style: { choice: "cyber" } }); };
   const run = async (url) => {
     const chunks = [];
     for await (const c of generatePage({ url }, { looks, facts: noFacts, planWithJev, complete: async () => "<section>x</section>" })) chunks.push(c);
@@ -176,7 +180,7 @@ test("section pictures get the site palette and medium, and a half-written pictu
 });
 
 test("the hero's invented counts defer to ones the page already states", async () => {
-  const forum = planFromAnswers({ url: "https://breadheads.net/t/grey", title: "My starter went grey", snippet: "Day 9, grey liquid on top. 31 replies." }, { kind: { choice: "forum" }, mood: { choice: "light" } });
+  const forum = planFromAnswers({ url: "https://breadheads.net/t/grey", title: "My starter went grey", snippet: "Day 9, grey liquid on top. 31 replies." }, { kind: { choice: "forum" }, style: { choice: "phpbb" } });
   const specs = [];
   const chunks = [];
   for await (const c of generatePage({ url: "https://breadheads.net/t/grey" }, { looks: new Map(), facts: noFacts, planWithJev: async () => forum, complete: async (spec) => { specs.push(spec); return "<section>x</section>"; } })) chunks.push(c);
@@ -185,7 +189,7 @@ test("the hero's invented counts defer to ones the page already states", async (
 });
 
 test("store pages name their products only in sections that have the fact sheet", async () => {
-  const store = planFromAnswers({ url: "https://lumenloom.example/lamps", title: "Desk Lamps" }, { kind: { choice: "store" }, mood: { choice: "light" } });
+  const store = planFromAnswers({ url: "https://lumenloom.example/lamps", title: "Desk Lamps" }, { kind: { choice: "store" }, style: { choice: "phpbb" } });
   const specs = [];
   const facts = async function* () { yield "Products: Weft 1 desk lamp $89; Warp 2 floor lamp $149"; };
   for await (const _ of generatePage({ url: "https://lumenloom.example/lamps" }, { looks: new Map(), facts, planWithJev: async () => store, complete: async (spec) => { specs.push(spec); return "<section>x</section>"; } })) { /* exhaust */ }

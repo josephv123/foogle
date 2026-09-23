@@ -12,7 +12,7 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
     globalThis.fetch = async (url, init) => {
       const p = JSON.parse(init.body);
       if (url === "https://api.typesafe.ai/v1/systemone") {
-        return Response.json({ answers: { kind: {choice:"forum"}, mood:{choice:"light"} } });
+        return Response.json({ answers: { kind: {choice:"forum"}, style:{choice:"phpbb"} } });
       }
       if (String(url) !== "https://openrouter.ai/api/v1/chat/completions" || p.model !== "openai/gpt-6-luna") {
         throw new Error("Unexpected provider or model");
