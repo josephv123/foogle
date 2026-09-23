@@ -30,6 +30,43 @@ Foogle runs on one stack, the one that won the comparison in [EXPERIMENTS.md](EX
 - `GET /web/<domain>/<path>` — the fake web. On first visit, Jev picks the kind and style, code renders the styled header at once (the style decides palette, type, density, component skins and the header, hero and section layouts), and four concurrent calls write the page's sections, streamed to your browser as they're written. Generated pages only link to other `/web/…` paths, so every click works. Query strings are part of the page (`/search?q=a` and `?q=b` are different pages), and query forms (search, filters) redirect to the equivalent GET, so search boxes on fake sites work. A site keeps the look of its first page, and its pictures are drawn in its medium and palette (`/img/…?s=&a=&bg=&fg=`). The top two search results start generating as soon as they appear, so the likeliest clicks open instantly.
 - **Fake sites are interactive.** Section writers use plain HTML with `data-*` attributes (add to cart, filterable grids, tabs, quizzes, calculators with live formulas, polls, pick-one chips, toggles, modals, countdowns, comment boxes) and one trusted runtime, `public/fw/widgets.js` + `widgets.css`, makes them work in each site's palette. Posts get working votes and replies, headers get working log-in/sign-up and cart drawers, and tables sort. Server-side state (`lib/interact.js`, in memory, keyed by an `fv` visitor cookie) keeps a cart per site, the visitor's login, and comments per page; someone on the site answers a posted comment a few seconds later. A form that does something (checkout, sign up, booking, contact) is answered by a confirmation page at its own URL (`?order=4821`, `?ref=K7Q2`) that opens with an exact, code-built receipt. Model-written JavaScript never runs: sections are sanitized as they stream (`lib/widgets.js`) and `/web/` pages are served with a Content-Security-Policy that only allows Foogle's own scripts.
 - Pages and result pages are cached in memory (capped, FIFO), so the back button is instant and a fake site stays consistent within a session. Restarting the server wipes the fake internet — except images, which also persist to a disk cache (`.foogle-cache/`) since they're the most expensive asset. Delete that directory to regenerate them.
+## Cost
+
+Measured on 2026-09-23 with OpenRouter's reported usage (`usage: {include: true}`), GPT-6 Luna at $0.10/$0.50 per million tokens in/out, over a few real runs of each action. "Calls" are Luna calls; Jev calls are listed separately (TypeSafe reports tokens, ~330 in / 32 out per call, but no price, so they're not in the dollars). Anything already cached (a result page, a site page, a picture, or a page still being generated) costs nothing.
+
+| Action | Cost | Calls | What's in it |
+|---|---:|---:|---|
+| Search, page 1 | $0.0060–0.0068 | 18–20 + 2 Jev | 3 result shards + Overview ≈ $0.0007; prefetching the top 2 results' pages is the rest |
+| Search, pages 2–10 | ~$0.006 | ~19 + 2 Jev | the same without the Overview |
+| Page (`/web/…`) | $0.0030–0.0033 | 7–8 (+1 Jev on a site's first page) | fact sheet, 4 sections, 2–3 pictures |
+| Form confirmation page | ~$0.0012 | 4 | fact sheet, 2 sections, 1 picture |
+| Comment reply | ~$0.00003 | 1 | one short reply |
+| Picture (`/img/…`) | $0.0004–0.0005 | 1 | one SVG |
+| Images tab | ~$0.0068 | 15 | 3 shards + 12 pictures |
+| News tab | ~$0.0045 | 11 | 3 shards + 8 thumbnails |
+| Maps tab | ~$0.0008 | 2 | places + the map |
+| Timelines tab | ~$0.0004 | 1 | one stream |
+| I'm Feeling Lucky | ~$0.0001 | 1 | plus the page it opens |
+| **Typical session** (1 search, 3 page clicks, 1 image search) | **~$0.02** | ~50 + 3 Jev | the top result was prefetched, so one click is free |
+
+So $1 buys roughly 50 typical sessions. In Chrome, hovering a result prerenders its page, so a visitor who hovers without clicking costs a little more.
+
+## Limits
+
+Once Foogle is public, every visitor is spending your OpenRouter credit, so `lib/limits.js` puts two limits on it. Both apply only to fresh generations: cached responses are free and don't count.
+
+- **Per visitor** (by IP; an IPv6 /64 counts as one visitor), a budget in dollars that refills over time. Each action is charged its measured cost from the table above, so a search costs about two pages and a picture a sixth of one. Over the limit, the visitor gets a Foogle-styled "slow down" page (429 with `Retry-After`; pictures get a blank placeholder instead). A comment still posts, it just gets no reply.
+- **Per day, for the whole site**, a spend circuit breaker tracked from the cost OpenRouter reports for every call. Once it's reached, new generations stop and visitors get "Foogle is out of juice for today" (503) until midnight UTC. Calls already in flight finish, so the day can overshoot by a few cents.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RATE_LIMIT_BURST_USD` | `0.10` | How much a visitor can spend at once (~14 searches or 30 pages) |
+| `RATE_LIMIT_USD_PER_HOUR` | `0.40` | How fast their budget refills (a new page every ~30s) |
+| `DAILY_BUDGET_USD` | `5` | Site-wide spend per UTC day (~250 typical sessions); `0` stops all generation |
+| `TRUST_PROXY` | unset | Unset: use the connection's address and ignore forwarded headers. `1` (or `N`): the last (Nth-from-last) `X-Forwarded-For` entry, for N proxies you run. `true`: the first entry. A header name (`fly-client-ip`, `cf-connecting-ip`): that header |
+
+Set any of the first three to `off` to disable it. Behind a proxy you must set `TRUST_PROXY`, or every visitor shares the proxy's address and one budget. Only set it behind a proxy, though, since anyone can send a forwarded header. The state is in memory, which is right for one instance; it resets on restart.
+
 ## Deploy
 
 Foogle deploys to Render's free web service tier from [`render.yaml`](render.yaml), a Render Blueprint. It builds with `npm ci`, starts with `npm start` on Node 22, health-checks `/` and redeploys on every push to `main`.

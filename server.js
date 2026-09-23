@@ -3,7 +3,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { streamText, completeText, generateImage, extractJSON, config } from "./lib/llm.js";
+import { streamText, completeText, generateImage, extractJSON, config, onUsage } from "./lib/llm.js";
 import { imageSpec, imageKey, imageQuery, SHAPES, NEWS_STYLES } from "./lib/images.js";
 import {
   mapsResultsPrompt, timelineResultsPrompt, searchShardPrompt, newsShardPrompt, imageShardPrompt, overviewPrompt,
@@ -16,10 +16,15 @@ import {
   createState, interactRoutes, visitor, replyWriter,
   submissionTitle, submissionSummary, responseBriefs, receiptSection,
 } from "./lib/interact.js";
+import { createLimits } from "./lib/limits.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
+// Per-visitor rate limits and the daily budget (lib/limits.js). Routes ask
+// limits.allow() only on a cache miss, so cached responses are free.
+const limits = createLimits();
+onUsage(limits.record);
 // ---------- caches ----------
 const CACHE_MAX = 200;
 const IMG_CACHE_MAX = 60;
@@ -500,6 +505,7 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
     const cacheKey = `${tab}:${page}:${query.toLowerCase()}`;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     if (serpCache.has(cacheKey)) return res.send(serpCache.get(cacheKey));
+    if (!limits.allow(req, res, tab === "All" ? "search" : tab.toLowerCase())) return;
 
     let html = "";
     const emit = (chunk) => {
@@ -574,6 +580,12 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
 // so browsers keep it for good and pages never wait on it twice.
 app.use("/fw", express.static(path.join(__dirname, "public", "fw"), { maxAge: "1y", immutable: true }));
 app.use(express.static(path.join(__dirname, "public")));
+// Posting a comment is free; the reply someone writes to it is a model call.
+// Over the limit, the comment still posts and just gets no reply.
+app.post("/fw/comments", (req, res, next) => {
+  req.noReply = !limits.check(req, "comment").ok;
+  next();
+});
 app.use(interactRoutes(siteState));
 
 // With an empty box, "I'm Feeling Lucky" is a trip somewhere random.
@@ -589,6 +601,7 @@ app.get("/search", async (req, res, next) => {
   if (req.query.lucky !== "1") return next();
   const query = String(req.query.q ?? "").trim() || LUCKY_QUERIES[Math.floor(Math.random() * LUCKY_QUERIES.length)];
   if (!config.apiKey) return res.status(500).send(setupPage());
+  if (!limits.allow(req, res, "lucky")) return;
   try {
     console.log(`[lucky] "${query}"`);
     // Only the first result is ever used, so ask for exactly one rather than
@@ -722,6 +735,8 @@ async function diskGetImage(prompt) {
   }
 }
 
+const isImageOnDisk = (prompt) => fs.access(`${imgFile(prompt)}.json`).then(() => true, () => false);
+
 function diskPutImage(prompt, img) {
   // Write-then-rename so a mid-write shutdown can't leave a corrupt cache file.
   const file = `${imgFile(prompt)}.json`;
@@ -777,9 +792,12 @@ app.use("/img", async (req, res) => {
   if (!prompt || !config.apiKey) return res.status(404).end();
   // Opened directly, an SVG is a document: nothing in it may run or load.
   res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
+  const spec = imageSpec(prompt, req.query);
+  const key = imageKey(spec);
+  if (!imageCache.has(key) && !imageInflight.has(key) && !(await isImageOnDisk(key)) && !limits.allow(req, res, "img")) return;
 
   try {
-    const img = await getImage(imageSpec(prompt, req.query));
+    const img = await getImage(spec);
     res.setHeader("Content-Type", img.mime);
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.send(img.buf);
@@ -900,6 +918,7 @@ app.use("/web", async (req, res) => {
 
   const cached = pageCache.get(webPath);
   if (cached) return res.send(cached);
+  if (!inflight.has(webPath) && !limits.allow(req, res, "web")) return;
 
   // Instant feedback: loading bar + badge go out before the model's first byte.
   res.write(vibePrelude(domain));
