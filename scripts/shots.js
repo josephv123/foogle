@@ -67,9 +67,13 @@ const PAGES = [
   { name: "known-site", path: web("en.wikipedia.org/wiki/Octopus", { q: "wikipedia octopus", title: "Octopus - Wikipedia" }) },
   // With the fake model, a style named in the URL is the one the site gets.
   { name: "zine-retro", path: web("staticbloom.net/web1996/issue-12", { q: "cassette culture", title: "Static Bloom #12: Tape Hiss Forever", kind: "zine" }) },
+  // A long domain as the wordmark of a centred header: on a phone it wraps between words, never between letters.
+  { name: "luxury-store", path: web("ember-and-oak-candles.com/luxury/candles", { q: "hand poured candles", title: "Hand-Poured Candles", kind: "store" }) },
   { name: "startup-calc", path: web("sunpatch.energy/solar-savings-calculator", { q: "solar savings", title: "Solar Savings Calculator", kind: "startup" }), steps: [{ select: ["[data-calc] select", "2"] }, { check: "[data-calc] input[type=checkbox]" }] },
   { name: "quiz", path: web("keeperquiz.club/which-lighthouse-keeper-are-you", { q: "lighthouse keepers", title: "Which Lighthouse Keeper Are You? A Quiz", kind: "blog" }), steps: [{ click: "[data-q] >> nth=0 >> button >> nth=1" }, { click: "[data-q] >> nth=1 >> button >> nth=0" }, { click: "[data-q] >> nth=2 >> button >> nth=1" }, { wait: ".fw-score:visible" }] },
   { name: "cart", path: STORE, steps: addToCart, full: false },
+  // The filter box finds cards by their data-tags too: a chip's name typed in shows its cards.
+  { name: "store-filter", path: web("lanternworks.shop/catalogue", { q: "storm lanterns", title: "Catalogue — Lanternworks", kind: "store" }), steps: [{ fill: [".fw-filterbar input[type=search]", "premium"] }, { wait: ".fw-count:text-matches('^[1-9]')" }] },
   // The address bar: "cnn" offers the search and cnn.com; "cnn.com" goes there.
   { name: "omnibox", path: STORE, browser: true, full: false, steps: [{ click: ".omni input" }, { fill: [".omni input", "cnn"] }, { wait: ".drop .row >> nth=1" }] },
   { name: "omnibox-go", path: "/", browser: true, full: false, steps: [{ click: ".omni input" }, { fill: [".omni input", "cnn.com"] }, { press: "Enter" }, { url: "/web/cnn\\.com$" }, { wait: 1500 }] },

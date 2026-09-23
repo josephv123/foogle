@@ -20,10 +20,13 @@ services:
         sync: false
       - key: TYPESAFE_API_KEY
         sync: false
-      # Render terminates TLS at a proxy, so trust one hop of X-Forwarded-For
-      # to get each visitor's real IP for rate limiting.
+      # Render sits behind Cloudflare and a proxy of its own, so the socket
+      # address and the rightmost X-Forwarded-For entry are Render's proxy,
+      # shared by every visitor, and the leftmost is whatever the visitor sent.
+      # Cloudflare puts each visitor's real IP in CF-Connecting-IP; rate limit
+      # by that. GET /api/whoami shows what the limiter sees.
       - key: TRUST_PROXY
-        value: "1"
+        value: cf-connecting-ip
       # Stop spending on AI calls for the day once this many dollars are used.
       - key: DAILY_BUDGET_USD
         value: "1"

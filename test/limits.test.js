@@ -75,6 +75,33 @@ test("forwarded headers are only believed when TRUST_PROXY is set", () => {
   assert.ok(proxied.allow(req("10.0.0.2", { "x-forwarded-for": "2.2.2.2" }), res(), "search"));
 });
 
+// A request as a Render web service gets it: through Cloudflare, then Render's own proxy.
+const viaRender = (headers = {}) => req("10.226.90.66", {
+  "x-forwarded-for": "81.97.145.24, 172.71.195.123, 10.226.90.65", "cf-connecting-ip": "81.97.145.24", "true-client-ip": "81.97.145.24",
+  cookie: "fv=secret-visitor-id", ...headers,
+});
+
+test("behind Render, the visitor is Cloudflare's connecting IP, not the rightmost forwarded hop", () => {
+  assert.equal(clientIP(viaRender(), "1"), "10.226.90.65"); // Render's proxy, shared by everyone
+  assert.equal(clientIP(viaRender(), "cf-connecting-ip"), "81.97.145.24");
+  // Render only appends to X-Forwarded-For, so its first entry is whatever the visitor sent.
+  assert.equal(clientIP(viaRender({ "x-forwarded-for": "6.6.6.6, 81.97.145.24, 172.71.195.123, 10.226.90.65" }), "true"), "6.6.6.6");
+});
+
+test("whoami shows how the limiter sees a request: its address, bucket and forwarded headers", () => {
+  const limits = createLimits({ env: { TRUST_PROXY: "cf-connecting-ip" }, now: clock() });
+  const me = limits.whoami(viaRender());
+  assert.equal(me.ip, "81.97.145.24");
+  assert.equal(me.visitor, "81.97.145.24");
+  assert.equal(me.trustProxy, "cf-connecting-ip");
+  assert.equal(me.socket, "10.226.90.66");
+  assert.deepEqual(me.headers, ["cf-connecting-ip", "cookie", "true-client-ip", "x-forwarded-for"]);
+  assert.deepEqual(me.forwarded, { "x-forwarded-for": "81.97.145.24, 172.71.195.123, 10.226.90.65", "true-client-ip": "81.97.145.24", "cf-connecting-ip": "81.97.145.24" });
+  assert.deepEqual(me.wouldBe, { 1: "10.226.90.65", 2: "172.71.195.123", true: "81.97.145.24", "cf-connecting-ip": "81.97.145.24", "true-client-ip": "81.97.145.24" });
+  assert.doesNotMatch(JSON.stringify(me), /secret/); // header names only, besides the three above
+  assert.equal(createLimits({ env: {}, now: clock() }).whoami(req("203.0.113.5")).trustProxy, null);
+});
+
 test("an IPv6 /64 is one visitor, and IPv4-mapped addresses are plain IPv4", () => {
   const limits = createLimits({ env: { RATE_LIMIT_BURST_USD: "0.007" }, now: clock() });
   assert.ok(limits.allow(req("2001:db8:1:2::1"), res(), "search"));
@@ -232,6 +259,20 @@ test("the server charges visitors only for fresh generations", async t => {
   assert.equal(comments.filter((c) => c.bot).length, 2);
   // Another visitor has their own budget.
   assert.equal((await fetch(`${base}/search?q=cold%20frames`, as("198.51.100.7"))).status, 200);
+});
+
+test("the server answers /api/whoami for free, as the limiter sees the request", async t => {
+  const base = await startServer(t, { cost: 0.01, env: { TRUST_PROXY: "cf-connecting-ip", RATE_LIMIT_BURST_USD: "0", DAILY_BUDGET_USD: "0" } });
+  for (let i = 0; i < 2; i++) {
+    const r = await fetch(`${base}/api/whoami`, { headers: { "CF-Connecting-IP": "81.97.145.24", "X-Forwarded-For": "81.97.145.24, 172.71.195.123" } });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get("cache-control"), "no-store");
+    const me = await r.json();
+    assert.equal(me.ip, "81.97.145.24");
+    assert.equal(me.forwarded["x-forwarded-for"], "81.97.145.24, 172.71.195.123");
+    assert.equal(me.forwarded["true-client-ip"], null);
+    assert.ok(me.headers.includes("cf-connecting-ip") && me.headers.includes("host"));
+  }
 });
 
 test("the server shows the out-of-juice page once the day's budget is spent", async t => {
