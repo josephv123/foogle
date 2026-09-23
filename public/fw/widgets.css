@@ -168,5 +168,6 @@ th.fw-sortable[aria-sort=ascending]::after { content: " ↑"; opacity: 1; }
 th.fw-sortable[aria-sort=descending]::after { content: " ↓"; opacity: 1; }
 .fw-receipt .callout h2 { margin: 0 0 .35em; }
 .fw-receipt table { max-width: 560px; }
+.fw-scroll { overflow-x: auto; }
 .fw-empty { padding: 12px 0; }
 @media (prefers-reduced-motion: reduce) { .fw-toast, dialog[open], .post.fw-new, .fw-flash, .fw-bump { animation: none !important; } }

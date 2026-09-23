@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { planFromAnswers, jevPlan, titleFromURL, defaultPlan } from "../lib/jev.js";
 import { STYLE_KEYS } from "../lib/styles.js";
 import { blockEnd, generatePage, cleanSection, cleanFactLine, paintPictures, salvageSection } from "../lib/pages.js";
-import { TruncatedError } from "../lib/llm.js";
+import { TruncatedError, DroppedError } from "../lib/llm.js";
 
 const args = { url: "https://garden.example/repairs", title: "Gardeners", snippet: "Repairs for greenhouses" };
 const plan = planFromAnswers(args, { kind: { choice: "forum" }, style: { choice: "phpbb" } });
@@ -268,6 +268,64 @@ test("a section cut off by the token limit keeps its whole blocks and is closed 
   assert.equal((html.match(/<section><h2>T<\/h2><p>kept<\/p><ul><li>a<\/li><\/ul><\/section>/g) ?? []).length, 2);
   assert.doesNotMatch(html, /<li>b/);
   assert.match(html, /<p>last<\/p><\/section>[\s\S]*<\/html>$/);
+});
+
+// OpenRouter ends a stream early now and then ("Stream ended before a terminal response event").
+const dropped = () => new DroppedError(new Error("Stream ended before a terminal response event"));
+const sectionOf = (spec) => Number(spec.user.match(/Write section (\d)/)[1]) - 1;
+
+test("a section whose stream drops keeps its whole blocks, live or in the background", async () => {
+  const cut = ["<section><h2>First</h2><p>one</p><p>tw", '<section><h2>T</h2><p>kept</p><ul><li>a</li><li>b', '<section><h2>T</h2><p>kept</p><ul><li>a</li><li>b'];
+  const calls = [];
+  const stream = (spec) => (async function* () {
+    const i = sectionOf(spec);
+    calls.push(i);
+    yield cut[i] ?? "<section><p>last</p></section>";
+    if (cut[i]) throw dropped();
+  })();
+  const chunks = [];
+  for await (const c of generatePage(args, { looks: new Map(), facts: noFacts, planWithJev: async () => plan, stream })) chunks.push(c);
+  const html = chunks.join("");
+  assert.match(html, /<section><h2>First<\/h2><p>one<\/p><\/section>/);
+  assert.equal((html.match(/<section><h2>T<\/h2><p>kept<\/p><ul><li>a<\/li><\/ul><\/section>/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /<p>tw|<li>b/);
+  assert.match(html, /<p>last<\/p><\/section>[\s\S]*<\/html>$/);
+  assert.equal(calls.length, 4); // they had whole blocks to keep, so none was written again
+});
+
+test("a section whose stream drops before anything but its heading is whole is written once more", async () => {
+  const attempts = [0, 0, 0, 0];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const stream = (spec) => (async function* () {
+    const i = sectionOf(spec);
+    const n = ++attempts[i];
+    if (i === 0 && n === 1) { yield "<section><h2>Live</h2>"; await gate; yield "<p>half"; throw dropped(); }
+    // The live section's heading is already on the page: the new reply carries on after it.
+    if (i === 0) { yield "```html\n<section><h2>Again</h2><p>who"; yield "le</p>"; yield "<p>more</p></section>"; return; }
+    if (i === 1 && n === 1) { yield "<section><h2>Ear"; throw dropped(); }
+    yield `<section><h2>S${i + 1}</h2><p>try ${n}</p></section>`;
+  })();
+  const gen = generatePage(args, { looks: new Map(), facts: noFacts, planWithJev: async () => plan, stream });
+  await gen.next(); // shell
+  const chunks = [(await gen.next()).value];
+  assert.equal(chunks[0], "<section><h2>Live</h2>"); // shown before its stream dropped
+  release();
+  for await (const c of gen) chunks.push(c);
+  const html = chunks.join("");
+  assert.match(html, /^<section><h2>Live<\/h2><p>whole<\/p><p>more<\/p><\/section><section><h2>S2<\/h2><p>try 2<\/p><\/section><section><h2>S3<\/h2><p>try 1<\/p><\/section>/);
+  assert.doesNotMatch(html, /Again|half|Ear/);
+  assert.match(html, /<\/html>$/);
+  assert.deepEqual(attempts, [2, 2, 1, 1]);
+});
+
+test("a section is written again only once: a second early drop fails the page", async () => {
+  let calls = 0;
+  const stream = () => (async function* () { calls++; yield "<section><h2>Gone"; throw dropped(); })();
+  await assert.rejects(async () => {
+    for await (const _ of generatePage(args, { looks: new Map(), facts: noFacts, planWithJev: async () => ({ ...plan, secs: plan.secs.slice(0, 1) }), stream })) { /* exhaust */ }
+  }, /Stream dropped mid-reply: Stream ended before a terminal response event/);
+  assert.equal(calls, 2);
 });
 
 test("a truncated section with nothing whole but its heading still fails the page", async () => {

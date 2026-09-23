@@ -668,6 +668,9 @@ app.post("/fw/comments", (req, res, next) => {
   next();
 });
 app.use(interactRoutes(siteState));
+// Which address rate limiting sees for you, and the forwarded headers it was
+// picked from: for checking TRUST_PROXY behind a host's proxies. Free.
+app.get("/api/whoami", (req, res) => res.set("Cache-Control", "no-store").json(limits.whoami(req)));
 
 // With an empty box, "I'm Feeling Lucky" is a trip somewhere random.
 const LUCKY_QUERIES = [

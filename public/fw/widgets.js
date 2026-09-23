@@ -369,8 +369,10 @@
       let shown = 0;
       for (const c of list) {
         const p = priceOf(c);
-        const ok = (f.active === "all" || tagsOf(c).includes(f.active))
-          && (!q || c.textContent.toLowerCase().includes(q))
+        const tags = tagsOf(c);
+        // The box searches a card's tags too: typing a chip's name finds what the chip does.
+        const ok = (f.active === "all" || tags.includes(f.active))
+          && (!q || `${c.textContent} ${tags.join(" ")}`.toLowerCase().includes(q))
           && (!ranges.length || Number.isNaN(p) || ranges.some(([lo, hi]) => p >= lo && p <= hi));
         c.hidden = !ok;
         if (ok) shown++;
@@ -718,6 +720,15 @@
     ["[data-live], .rail b", (n) => { if (n.hasAttribute("data-live") || /^\s*online/.test(n.nextSibling?.textContent ?? "")) live(n); }],
     // Header cells arrive with their table's head, before the rows stream in.
     ["main thead th", (th) => { if (!th.closest(".fw-receipt, .infobox")) th.classList.add("fw-sortable"); }],
+    // A table wider than its column (on a phone, in a narrow tile) scrolls
+    // sideways in its own box instead of widening the page. Rows still
+    // streaming in land in the moved table.
+    ["main table", (t) => {
+      if (t.closest(".infobox, .fw-scroll")) return;
+      const box = el("div", { class: "fw-scroll" });
+      t.replaceWith(box);
+      box.append(t);
+    }],
   ];
   // A contents box (a known site's article, see lib/brandtheme.js) lists the
   // page's section headings as they stream in.
