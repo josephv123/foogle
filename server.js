@@ -3,8 +3,8 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { streamText, completeText, generateImage, draftSVG, extractJSON, config, onUsage, FAST_ROUTE } from "./lib/llm.js";
-import { imageSpec, imageKey, imageQuery, sketchSVG, sketchCSS, SHAPES, NEWS_STYLES } from "./lib/images.js";
+import { streamText, completeText, generateImage, extractJSON, config, onUsage, FAST_ROUTE } from "./lib/llm.js";
+import { imageSpec, imageKey, imageQuery, sketchCSS, fadeIn, SHAPES, NEWS_STYLES } from "./lib/images.js";
 import {
   mapsResultsPrompt, timelineResultsPrompt, searchShardPrompt, newsShardPrompt, imageShardPrompt, overviewPrompt,
   SEARCH_ANGLES, NEWS_ANGLES, IMAGE_ANGLES,
@@ -42,7 +42,7 @@ const pageCache = new Map(); // "/domain.tld/path" -> full HTML
 const serpCache = new Map(); // "<tab>:<query>" -> full HTML
 const imageCache = new Map(); // imageKey(spec) -> { mime, buf }
 const inflight = new Map(); // page path -> live generation entry (chunks so far)
-const imageInflight = new Map(); // imageKey(spec) -> picture job (see imageJob)
+const imageInflight = new Map(); // imageKey(spec) -> picture job (see getImage)
 const siteContext = new Map(); // domain -> { query, title } from first visit
 // Carts, logins, comments and form submissions on the fake sites.
 const siteState = createState({ reply: replyWriter(completeText) });
@@ -462,7 +462,7 @@ function renderNewsItem(query, n) {
 
 // Tiles keep their picture's aspect ratio and grow in proportion to it, so
 // each row of the grid is one height and fills the width, like Google Images.
-// Until its picture paints in (see /img), a tile shows its sketch: the
+// Until its picture fades in (see /img), a tile shows its sketch: the
 // picture's colours, out of focus.
 const TILE_HEIGHT = 180;
 function renderImageTile(query, t) {
@@ -889,20 +889,19 @@ function diskPutImage(prompt, img) {
 }
 
 // One job per picture being read from disk or drawn, shared by /img requests,
-// result thumbnails and the page-stream scanner. While the model draws it,
-// `draft` is the picture so far (draftSVG in lib/llm.js) and each new draft
-// goes to `watchers`: browsers watching it paint in (see paintImage). `ticket`
-// is its place in the queue for the model (lib/llm.js): a picture nobody is
-// waiting for yet (`urgent: false`) moves up once someone is.
-const DRAFT_MS = 250; // at most four drafts a second
-function imageJob(spec, { urgent = true } = {}) {
+// result thumbnails and the page-stream scanner. `ticket` is its place in the
+// queue for the model (lib/llm.js): a picture nobody is waiting for yet
+// (`urgent: false`) moves up once someone is.
+function getImage(spec, { urgent = true } = {}) {
   const key = imageKey(spec);
+  const cached = imageCache.get(key);
+  if (cached) return Promise.resolve(cached);
   let job = imageInflight.get(key);
   if (job) {
     if (urgent) job.ticket.urgent = true;
-    return job;
+    return job.done;
   }
-  job = { draft: null, watchers: new Set(), ticket: { urgent } };
+  job = { ticket: { urgent } };
   job.done = (async () => {
     const disk = await diskGetImage(key);
     if (disk) {
@@ -911,22 +910,8 @@ function imageJob(spec, { urgent = true } = {}) {
     }
     console.log(`[image] ${spec.style}/${spec.shape} ${spec.description.slice(0, 70)}`);
     const t0 = Date.now();
-    const secs = (t) => `${((t - t0) / 1000).toFixed(1)}s`;
-    let drafted = 0;
-    let firstDraft = null;
-    const img = await generateImage(spec, {
-      ticket: job.ticket,
-      onText: (text) => {
-        if (Date.now() - drafted < DRAFT_MS) return;
-        drafted = Date.now();
-        const draft = draftSVG(text);
-        if (!draft || draft === job.draft) return;
-        firstDraft ??= drafted;
-        job.draft = draft;
-        for (const watch of job.watchers) watch(draft);
-      },
-    });
-    console.log(`[image] drew ${spec.style}/${spec.shape} in ${secs(Date.now())}${firstDraft ? `, first draft at ${secs(firstDraft)}` : ""} (${img.buf.length} bytes)`);
+    const img = await generateImage(spec, { ticket: job.ticket });
+    console.log(`[image] drew ${spec.style}/${spec.shape} in ${((Date.now() - t0) / 1000).toFixed(1)}s (${img.buf.length} bytes)`);
     cachePut(imageCache, key, img, IMG_CACHE_MAX);
     diskPutImage(key, img);
     return img;
@@ -935,12 +920,7 @@ function imageJob(spec, { urgent = true } = {}) {
   // .finally() forks a new promise chain — give it its own catch or a
   // failed generation becomes an unhandled rejection and kills the process.
   job.done.finally(() => imageInflight.delete(key)).catch(() => {});
-  return job;
-}
-
-function getImage(spec, opts) {
-  const cached = imageCache.get(imageKey(spec));
-  return cached ? Promise.resolve(cached) : imageJob(spec, opts).done;
+  return job.done;
 }
 
 // Start generating before the browser ever requests the image. `query` is
@@ -956,44 +936,10 @@ function placeholderSVG(prompt) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},45%,82%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360},40%,68%)"/></linearGradient></defs><rect width="800" height="600" fill="url(#g)"/></svg>`;
 }
 
-// A picture still being drawn paints itself in wherever a browser shows it
-// (an <img>, a CSS background): a multipart/x-mixed-replace response, each
-// part replacing the one before. First a sketch in the medium's colours
-// (sketchSVG in lib/images.js), then every new draft, then the picture.
-// Chrome, Firefox and Safari show each part of an <img> as it arrives
-// (Safari shows only the last of a CSS background). Every part is sanitized
-// like a finished picture. Anything that isn't an image load (a fetch, the
-// SVG opened as a page) waits for the finished picture instead.
-const BOUNDARY = "foogle-picture";
-// Each part ends with the boundary: browsers show a part once they see the
-// boundary after it, so one that led the next part would show a frame late.
-const framePart = (svg, last = false) => Buffer.concat([
-  Buffer.from(`Content-Type: image/svg+xml\r\nContent-Length: ${Buffer.byteLength(svg)}\r\n\r\n`),
-  Buffer.from(svg),
-  Buffer.from(`\r\n--${BOUNDARY}${last ? "--" : ""}\r\n`),
-]);
-
-function paintImage(spec, res) {
-  const job = imageJob(spec);
-  res.writeHead(200, { "Content-Type": `multipart/x-mixed-replace; boundary=${BOUNDARY}`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
-  const send = (svg) => res.write(framePart(svg));
-  res.write(`--${BOUNDARY}\r\n`);
-  send(job.draft ?? sketchSVG(spec));
-  job.watchers.add(send);
-  res.on("close", () => job.watchers.delete(send));
-  job.done
-    .then((img) => img.buf, (err) => {
-      console.error(`[image] failed:`, err.message);
-      return placeholderSVG(spec.description);
-    })
-    .then((svg) => {
-      job.watchers.delete(send);
-      if (!res.destroyed) res.end(framePart(svg, true));
-    });
-}
-
 // ?s=&a= pick the picture's medium and shape; ?bg=&fg= carry a generated
-// site's palette, which the picture is drawn with.
+// site's palette, which the picture is drawn with. Only the finished picture
+// is sent, and it fades in over the sketch its page shows behind it (see
+// sketchCSS and fadeIn in lib/images.js).
 app.use("/img", async (req, res) => {
   if (req.method !== "GET") return res.status(405).end();
   const prompt = normalizeImagePrompt(req.query.p ?? req.path.replace(/^\/+/, ""));
@@ -1002,20 +948,18 @@ app.use("/img", async (req, res) => {
   res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
   const spec = imageSpec(prompt, req.query);
   const key = imageKey(spec);
-  const drawing = !imageCache.has(key) && !(await isImageOnDisk(key));
-  if (drawing && !imageInflight.has(key) && !limits.allow(req, res, "img")) return;
-  if (drawing && !imageCache.has(key) && req.get("sec-fetch-dest") === "image") return paintImage(spec, res);
+  if (!imageCache.has(key) && !imageInflight.has(key) && !(await isImageOnDisk(key)) && !limits.allow(req, res, "img")) return;
 
   try {
     const img = await getImage(spec);
     res.setHeader("Content-Type", img.mime);
     res.setHeader("Cache-Control", "public, max-age=86400");
-    res.send(img.buf);
+    res.send(Buffer.from(fadeIn(img.buf)));
   } catch (err) {
     console.error(`[image] failed:`, err.message);
     res.setHeader("Content-Type", "image/svg+xml");
     res.setHeader("Cache-Control", "no-store"); // don't cache failures; retry next load
-    res.send(placeholderSVG(prompt));
+    res.send(fadeIn(placeholderSVG(prompt)));
   }
 });
 

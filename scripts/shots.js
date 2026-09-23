@@ -20,6 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { FADE_IN } from "../lib/images.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { values: opts } = parseArgs({
@@ -232,6 +233,7 @@ async function shoot(browser, base, spec, vp) {
     if (spec.steps?.length) await page.waitForTimeout(250); // let toasts and transitions settle
     if (await tab.getByText("collapsed mid-construction").count()) problems.push("page generation failed (collapse notice on the page)");
     if (spec.full !== false && tab !== page.mainFrame()) await unframe(page, tab);
+    await settlePictures(tab);
     await page.screenshot({ path: file, fullPage: spec.full !== false, animations: "disabled" });
     return { ...spec, vp, file, ms: Date.now() - started, problems };
   } catch (err) {
@@ -256,6 +258,20 @@ async function unframe(page, tab) {
   const height = await tab.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
   await page.addStyleTag({ content: `html,body{height:auto!important;overflow:visible!important}.views{flex:none!important;height:${height}px!important}` });
   await page.waitForTimeout(100);
+}
+
+// Pictures fade in over their sketches the first time they're on screen (see
+// FADE_IN in lib/images.js), and for a picture further down the page that is
+// the shot itself. So each finished picture is shown as it looks once it has
+// faded in; ones still being drawn keep their sketch.
+function settlePictures(tab) {
+  return tab.evaluate((fade) => Promise.all([...document.images]
+    .filter((img) => img.complete && img.naturalWidth && new URL(img.src).pathname.startsWith("/img/"))
+    .map(async (img) => {
+      const svg = (await (await fetch(img.src)).text()).replace(fade, "");
+      img.src = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+      await img.decode().catch(() => {});
+    })), FADE_IN).catch(() => {});
 }
 
 // Run jobs a few at a time.

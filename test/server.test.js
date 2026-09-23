@@ -95,8 +95,9 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   assert.match(page, /<\/html>/);
   assert.match(output, /model:.*openai\/gpt-6-luna/);
   assert.match(output, /SECTION_CALL=4/);
-  // Hero art is an SVG illustration drawn in the site's palette.
-  const art = page.match(/<img class="art" src="([^"]+)"/)[1].replaceAll("&amp;", "&");
+  // Hero art is an SVG illustration drawn in the site's palette, showing its
+  // sketch until it fades in.
+  const art = page.match(/<img class="art" src="([^"]+)" style="background:radial-gradient\([^"]+\)" alt="">/)[1].replaceAll("&amp;", "&");
   const svg = await (await fetch(base + art)).text();
   assert.match(svg, /^<svg/);
   assert.match(output, /ART_PROMPT=.*Palette: the image sits on a page with background \S+ and accent hsl\(/);
@@ -105,7 +106,7 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   // keeps that shape.
   const images = await (await fetch(`${base}/images?q=greenhouse`)).text();
   assert.match(images, /src="\/img\/greenhouse%20frame%20side%20elevation\?s=blueprint&amp;a=tall"/);
-  // Until its picture paints in, a tile shows the picture's colours, out of focus.
+  // Until its picture fades in, a tile shows the picture's colours, out of focus.
   assert.match(images, /style="aspect-ratio:280\/420;background:radial-gradient\([^"]*linear-gradient\(#1f4f8f, #163a6a\)"/);
   const drawn = await fetch(`${base}/img/greenhouse%20frame%20side%20elevation?s=blueprint&a=tall`);
   assert.match(drawn.headers.get("content-security-policy"), /default-src 'none'/);
@@ -114,22 +115,12 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   assert.match(output, /ART_ROUTE=\[true,"throughput"\]/);
   assert.match(output, /IMAGES_ROUTE=throughput/);
   assert.doesNotMatch(output, /ART_ROUTE=(?!\[true,"throughput"\])/);
-  // Asked for by an <img> while it's drawn, a picture paints itself in: a
-  // sketch in its colours, then drafts, then the picture, each part replacing
-  // the last. Once drawn, it's a plain SVG.
-  const img = { headers: { "Sec-Fetch-Dest": "image" } };
-  const painting = await fetch(`${base}/img/greenhouse%20at%20dusk?s=photo&a=square`, img);
-  assert.equal(painting.headers.get("content-type"), "multipart/x-mixed-replace; boundary=foogle-picture");
-  assert.equal(painting.headers.get("cache-control"), "no-store");
+  // An <img> asking for a picture still being drawn waits for the finished
+  // one: no drafts. It fades in over the sketch its page shows behind it.
+  const painting = await fetch(`${base}/img/greenhouse%20at%20dusk?s=photo&a=square`, { headers: { "Sec-Fetch-Dest": "image" } });
+  assert.equal(painting.headers.get("content-type"), "image/svg+xml");
   assert.match(painting.headers.get("content-security-policy"), /default-src 'none'/);
-  // Each part is followed by the boundary, so a browser shows it at once.
-  const parts = (await painting.text()).split("--foogle-picture");
-  assert.ok(parts.length >= 4 && parts[0] === "" && parts.at(-1) === "--\r\n");
-  assert.match(parts[1], /^\r\nContent-Type: image\/svg\+xml\r\nContent-Length: \d+\r\n\r\n<svg [^>]*viewBox="0 0 400 400">[\s\S]*<animate [\s\S]*<\/svg>\r\n$/);
-  assert.match(parts.at(-2), /\r\n\r\n<svg xmlns="http:\/\/www.w3.org\/2000\/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#7ab"\/><\/svg>\r\n$/);
-  const painted = await fetch(`${base}/img/greenhouse%20at%20dusk?s=photo&a=square`, img);
-  assert.equal(painted.headers.get("content-type"), "image/svg+xml");
-  assert.match(await painted.text(), /^<svg/);
+  assert.equal(await painting.text(), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><style>:root{animation:foogle-in .35s ease-out both}@keyframes foogle-in{from{opacity:0}}</style><rect width="400" height="300" fill="#7ab"/></svg>');
   // An old-style bare /img URL still draws, in a style its description names.
   const bare = await fetch(`${base}/img/pixel%20art%20of%20a%20greenhouse`);
   assert.equal(bare.status, 200);
@@ -168,7 +159,7 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
 
   // Generated pages may run only Foogle's scripts, and load its runtime.
   const res = await fetch(url);
-  assert.match(res.headers.get("content-security-policy"), /script-src 'self' 'unsafe-hashes' 'sha256-/);
+  assert.match(res.headers.get("content-security-policy"), /script-src 'self';/);
   assert.match(await res.text(), /<script src="\/fw\/widgets\.js\?v=\w+" async>/);
   assert.equal((await fetch(`${base}/fw/widgets.js`)).status, 200);
 
