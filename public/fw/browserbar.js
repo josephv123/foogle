@@ -446,7 +446,6 @@ $(".sw-new").addEventListener("click", () => { toggleSwitcher(false); newTab(); 
 // show as each source answers, in this order; ones that go to the same place
 // are shown once, first wins.
 const here = location.host;
-const fromServer = (path) => async (text, signal) => (await (await fetch(`${path}?${new URLSearchParams({ q: text })}`, { signal })).json()).rows ?? [];
 
 // AI suggestions (/api/suggest, through public/suggest.js): what's shown now
 // comes from lists already fetched, and more stream in (see aiArrived). A
@@ -474,7 +473,6 @@ function aiRows(text) {
 const SOURCES = [
   async (text) => primaryRows(text, { here }), // the first is what Enter does
   async (text) => recentRows(text, recentSearches()),
-  fromServer("/api/sites"), // known sites the text names (lib/brands.js)
   async (text) => { ai.set(classify(text, { here }).kind === "search" ? text : ""); return aiRows(text); },
 ];
 const AI_SOURCE = SOURCES.length - 1;

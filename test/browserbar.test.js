@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { displayURL, omniboxTarget, tabTitle, isHome, primaryRows, siteSuggestions, browserShell } from "../lib/browserbar.js";
+import { displayURL, omniboxTarget, tabTitle, isHome, primaryRows, browserShell } from "../lib/browserbar.js";
 import { recentRows, rememberSearch } from "../public/fw/browsing.js";
 
 test("the bar shows a fake site's own URL, not Foogle's /web/ path", () => {
@@ -96,21 +96,6 @@ test("suggestions: the first row is what Enter does; a URL goes there, anything 
   assert.deepEqual(rows("localhost:3000")[0], ["url", "localhost:3000", "/web/localhost:3000"]);
   assert.deepEqual(rows("10.0.0.7/admin")[0], ["url", "10.0.0.7/admin", "/web/10.0.0.7/admin"]);
   assert.deepEqual(rows("   "), []);
-});
-
-test("known sites (lib/brands.js) the text names are offered, by brands' own rules", () => {
-  const sites = (text) => siteSuggestions(text).map((r) => [r.label, r.detail, r.target]);
-  assert.deepEqual(sites("cnn"), [["cnn.com", "CNN", "/web/www.cnn.com"]]);
-  assert.deepEqual(sites("Apple"), [["apple.com", "Apple", "/web/www.apple.com"]]);
-  assert.deepEqual(sites("reddit sourdough"), [["reddit.com/r/sourdough", "Reddit", "/web/www.reddit.com/r/sourdough/"]]);
-  // As the name is typed…
-  assert.deepEqual(sites("red"), [["reddit.com", "Reddit", "/web/www.reddit.com"]]);
-  // …but not while it could still be an everyday word, or when it is one in a search.
-  assert.deepEqual(sites("app"), []);
-  assert.deepEqual(sites("apple pie"), []);
-  // A URL goes where it says.
-  assert.deepEqual(sites("cnn.com"), []);
-  assert.equal(siteSuggestions("netf")[0].fill, "netflix.com");
 });
 
 test("recent searches (foogle.recent, newest first) match what is typed; omnibox searches join them", () => {

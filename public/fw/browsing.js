@@ -114,8 +114,8 @@ export function classify(input, { here = "" } = {}) {
 export const omniboxTarget = (input, opts) => classify(input, opts).target;
 
 // ---------- suggestions ----------
-// Known sites the text names come from the server (/api/sites, built on
-// lib/brands.js); the rest are worked out here.
+// Sites and searches the model suggests come from /api/suggest (see
+// browserbar.js); the rest are worked out here.
 // A suggestion row: { kind: "url" | "search" | "recent" | "site", label, detail, fill, target }.
 // `fill` is what the address field shows while the row is picked with the
 // arrow keys.

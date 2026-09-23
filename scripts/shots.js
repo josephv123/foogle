@@ -62,9 +62,21 @@ const PAGES = [
   { name: "forum", path: web("crumbforum.net/t/starter-smells-like-nail-polish", { q: "sourdough starter", title: "Starter smells like nail polish — help?", kind: "forum" }) },
   { name: "news-site", path: web("harborledger.news/2026/09/harbor-festival-returns", { q: "harbor festival", title: "Harbor Festival Returns After Six Years", kind: "news" }) },
   { name: "wiki", path: web("fogpedia.org/wiki/fog-signal", { q: "fog signals", title: "Fog signal", kind: "wiki" }) },
-  // A search naming a real site, and that site's own look (lib/brands.js).
-  { name: "known-search", path: "/search?q=cnn" },
-  { name: "known-site", path: web("en.wikipedia.org/wiki/Octopus", { q: "wikipedia octopus", title: "Octopus - Wikipedia" }) },
+  // Invented sites' other page types, reached by their own links: a forum's
+  // feed, a news front page, a shop's product page (lib/design.js).
+  { name: "forum-feed", path: "/web/crumbforum.net/latest" },
+  { name: "news-front", path: "/web/harborledger.news/" },
+  { name: "store-product", path: web("lanternworks.shop/products/kestrel-storm-lantern-mk-ii", { q: "storm lanterns", title: "Kestrel Storm Lantern Mk II — $89", kind: "store" }) },
+  // A search naming a real site, and real sites' pages in their own look.
+  { name: "real-search", path: "/search?q=cnn" },
+  { name: "real-news", path: web("www.cnn.com/", { q: "cnn", title: "CNN: Breaking News, Latest News and Videos" }) },
+  { name: "real-forum", path: web("www.reddit.com/r/sourdough/", { q: "reddit sourdough", title: "r/Sourdough" }) },
+  { name: "real-wiki", path: web("en.wikipedia.org/wiki/Octopus", { q: "wikipedia octopus", title: "Octopus - Wikipedia" }) },
+  { name: "real-product", path: web("www.amazon.com/Kindle-Paperwhite-16GB-Glare-Free/dp/B0CFPJYX7P", { q: "amazon kindle paperwhite", title: "Amazon.com: Kindle Paperwhite 16GB" }) },
+  { name: "real-paper", path: web("www.nytimes.com/", { q: "nytimes", title: "The New York Times - Breaking News, US News, World News and Videos" }) },
+  { name: "real-repo", path: web("github.com/facebook/react", { q: "github react", title: "facebook/react: The library for web and native user interfaces" }) },
+  { name: "real-film", path: web("letterboxd.com/", { q: "letterboxd", title: "Letterboxd • Social film discovery." }) },
+  { name: "real-music", path: web("bandcamp.com/", { q: "bandcamp", title: "Bandcamp" }) },
   // With the fake model, a style named in the URL is the one the site gets.
   { name: "zine-retro", path: web("staticbloom.net/web1996/issue-12", { q: "cassette culture", title: "Static Bloom #12: Tape Hiss Forever", kind: "zine" }) },
   // A long domain as the wordmark of a centred header: on a phone it wraps between words, never between letters.
