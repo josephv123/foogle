@@ -11,6 +11,11 @@ import {
 } from "./lib/prompts.js";
 import { generatePage } from "./lib/pages.js";
 import { siteMark } from "./lib/icons.js";
+import { PAGE_CSP } from "./lib/widgets.js";
+import {
+  createState, interactRoutes, visitor, replyWriter,
+  submissionTitle, submissionSummary, responseBriefs, receiptSection,
+} from "./lib/interact.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -24,6 +29,8 @@ const imageCache = new Map(); // imageKey(spec) -> { mime, buf }
 const inflight = new Map(); // page path -> live generation entry (chunks so far)
 const imageInflight = new Map(); // imageKey(spec) -> Promise<{mime, buf}>
 const siteContext = new Map(); // domain -> { query, title } from first visit
+// Carts, logins, comments and form submissions on the fake sites.
+const siteState = createState({ reply: replyWriter(completeText) });
 
 // Pages for the top results of a search start generating as soon as those
 // results render, so the likeliest clicks open instantly.
@@ -563,7 +570,11 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
 }
 
 // ---------- routes ----------
+// The interactive-component runtime is versioned by content (see widgetHead),
+// so browsers keep it for good and pages never wait on it twice.
+app.use("/fw", express.static(path.join(__dirname, "public", "fw"), { maxAge: "1y", immutable: true }));
 app.use(express.static(path.join(__dirname, "public")));
+app.use(interactRoutes(siteState));
 
 // With an empty box, "I'm Feeling Lucky" is a trip somewhere random.
 const LUCKY_QUERIES = [
@@ -857,10 +868,17 @@ async function pipeEntry(entry, res) {
   else res.end(VIBE_CLEANUP);
 }
 
-// Generated sites often have forms. POSTs become a GET with the fields in the
-// query string, so the result page is bookmarkable and gets generated like any other.
+// Generated sites often have forms. One that does something (checkout, sign
+// up, book, contact) is recorded and answered by a confirmation page at its
+// own URL (?order=4821, ?ref=K7Q2). A query form (search, filters) becomes a
+// GET with the fields in the query string, so the result page is bookmarkable
+// and gets generated like any other.
 app.post(/^\/web\//, express.urlencoded({ extended: false, limit: "20kb" }), (req, res) => {
-  const params = new URLSearchParams(Object.entries(req.body ?? {}).map(([k, v]) => [k, String(v)]));
+  const fields = Object.fromEntries(Object.entries(req.body ?? {}).map(([k, v]) => [k, String(v)]));
+  const [, , domain = "", ...rest] = req.path.split("/");
+  const done = domain && siteState.submit(visitor(req, res), domain, `/${rest.join("/")}`.replace(/\/+$/, ""), fields);
+  if (done) return res.redirect(303, done.location);
+  const params = new URLSearchParams(Object.entries(fields).filter(([k]) => !k.startsWith("_")));
   res.redirect(303, `${req.path}${params.size ? `?${params}` : ""}`);
 });
 
@@ -877,6 +895,8 @@ app.use("/web", async (req, res) => {
   if (!config.apiKey) return res.status(500).send(setupPage());
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  // Generated pages share Foogle's origin: only Foogle's own scripts may run.
+  res.setHeader("Content-Security-Policy", PAGE_CSP);
 
   const cached = pageCache.get(webPath);
   if (cached) return res.send(cached);
@@ -885,21 +905,26 @@ app.use("/web", async (req, res) => {
   res.write(vibePrelude(domain));
   res.flushHeaders?.();
 
-  const { fq: query, ft: title, fs: snippet, fk: resultKind } = req.query;
-  await pipeEntry(ensurePage(webPath, search, { query, title, snippet, resultKind }), res);
+  const { fq: query, fs: snippet, fk: resultKind } = req.query;
+  let { ft: title } = req.query;
+  // A confirmation page: the form the visitor just submitted is its subject.
+  const sub = siteState.submission(domain, params);
+  const submission = sub && { summary: submissionSummary(sub), briefs: responseBriefs(sub), receipt: receiptSection(sub, domain) };
+  if (sub) title = submissionTitle(sub);
+  await pipeEntry(ensurePage(webPath, search, { query, title, snippet, resultKind, submission }), res);
 });
 
 // Join the live generation of a page, or start one. Shared by visits, hover
 // warming and search-result prefetch, so a page is only ever generated once.
-function ensurePage(webPath, search, { query, title, snippet, resultKind }) {
+function ensurePage(webPath, search, { query, title, snippet, resultKind, submission }) {
   const existing = inflight.get(webPath);
   if (existing || pageCache.has(webPath)) return existing;
   const domain = webPath.split("/")[1];
   const context = siteContext.get(domain);
-  if (!context && (query || title)) siteContext.set(domain, { query, title });
+  if (!context && !submission && (query || title)) siteContext.set(domain, { query, title });
   const pathname = webPath.slice(domain.length + 1, webPath.length - search.length);
   const url = `https://${domain}${pathname || "/"}${search}`;
-  return startPageGeneration(webPath, { url, query, title, snippet, resultKind, siteContext: context });
+  return startPageGeneration(webPath, { url, query, title, snippet, resultKind, siteContext: context, submission });
 }
 
 const listener = app.listen(PORT, () => {
