@@ -67,6 +67,10 @@ test("Jev's ratings choose a plausible style, seeded by the domain", () => {
   const wikis = sites.map((site) => pickStyle(site, { phpbb: 0.72, academic: 0.72, minimal: 0.65 }, "wiki"));
   assert.ok(wikis.filter((p) => p === "phpbb").length < wikis.filter((p) => p === "academic").length / 2);
   assert.ok(sites.every((site) => pickStyle(site, { phpbb: 0.6, academic: 0.8 }, "wiki") === "academic"));
+  // Styles are scored by lift over Jev's usual rating for them: a middling
+  // rating for "minimal" (plausible for anything) loses to a fair one for
+  // "luxury" (usually implausible).
+  assert.ok(sites.every((site) => pickStyle(site, { minimal: 0.55, luxury: 0.5 }, "store") === "luxury"));
   // No ratings (Jev unavailable) falls back to the kind's usual styles.
   assert.equal(pickStyle("x.example", {}, "gov"), defaultStyle("gov", "x.example"));
   assert.ok(KIND_STYLES.gov.includes(defaultStyle("gov", "x.example")));
