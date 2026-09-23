@@ -1,0 +1,115 @@
+/* The browser bar (lib/browserbar.js), inlined into its shadow root: nothing
+   here can touch the page, and no page style can touch the bar. A neutral
+   light/dark browser look, whatever the site underneath. Heights add up to
+   --fbar-h in lib/browserbar.js: 34 + 41 on wide screens, 49 on phones. */
+:host {
+  all: initial !important;
+  display: block !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: var(--fbar-h, 75px) !important;
+  z-index: 2147483600 !important;
+  font: 13px/1.25 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  color: var(--fb-text) !important;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  --fb-frame: #dee1e6;
+  --fb-bar: #fff;
+  --fb-omni: #f1f3f4;
+  --fb-omni-hover: #e8eaed;
+  --fb-text: #202124;
+  --fb-muted: #5f6368;
+  --fb-line: #dadce0;
+  --fb-hover: rgba(60, 64, 67, .08);
+  --fb-press: rgba(60, 64, 67, .16);
+  --fb-accent: #1a73e8;
+}
+@media (prefers-color-scheme: dark) {
+  :host {
+    --fb-frame: #202124;
+    --fb-bar: #35363a;
+    --fb-omni: #202124;
+    --fb-omni-hover: #292a2d;
+    --fb-text: #e8eaed;
+    --fb-muted: #9aa0a6;
+    --fb-line: #202124;
+    --fb-hover: rgba(232, 234, 237, .08);
+    --fb-press: rgba(232, 234, 237, .16);
+    --fb-accent: #8ab4f8;
+  }
+}
+@media print { :host { display: none !important; } }
+* { box-sizing: border-box; }
+svg { display: block; width: 20px; height: 20px; fill: currentColor; }
+a, button { color: inherit; -webkit-user-select: none; user-select: none; }
+
+/* ---------- tab strip ---------- */
+.tabs { display: flex; align-items: flex-end; gap: 8px; height: 34px; padding: 0 8px 0 16px; background: var(--fb-frame); -webkit-user-select: none; user-select: none; }
+.tab { position: relative; display: flex; align-items: center; gap: 8px; width: 240px; max-width: calc(100% - 44px); height: 30px; padding: 0 6px 0 12px; border-radius: 8px 8px 0 0; background: var(--fb-bar); font-size: 12px; cursor: default; }
+/* The curves where the tab flares into the toolbar. */
+.tab::before, .tab::after { content: ""; position: absolute; bottom: 0; width: 8px; height: 8px; pointer-events: none; }
+.tab::before { left: -8px; background: radial-gradient(circle at 0 0, transparent 8px, var(--fb-bar) 8.5px); }
+.tab::after { right: -8px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--fb-bar) 8.5px); }
+.ico { position: relative; flex: none; width: 16px; height: 16px; }
+.fav { display: block; width: 16px; height: 16px; border-radius: 3px; }
+.spin { display: none; position: absolute; inset: 1px; border: 2px solid var(--fb-accent); border-right-color: transparent; border-radius: 50%; animation: fb-spin .75s linear infinite; }
+:host([loading]) .fav { visibility: hidden; }
+:host([loading]) .spin { display: block; }
+@keyframes fb-spin { to { transform: rotate(360deg); } }
+.title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; color: var(--fb-text); -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 16px), transparent); }
+.x, .new { display: grid; place-items: center; flex: none; border-radius: 50%; color: var(--fb-muted); text-decoration: none; }
+.x { width: 20px; height: 20px; }
+.x svg { width: 14px; height: 14px; }
+.new { width: 28px; height: 28px; margin-bottom: 2px; }
+.x:hover, .new:hover { background: var(--fb-press); color: var(--fb-text); }
+
+/* ---------- toolbar ---------- */
+.tool { display: flex; align-items: center; gap: 2px; height: 41px; padding: 0 10px 1px 6px; background: var(--fb-bar); border-bottom: 1px solid var(--fb-line); }
+.btn { display: grid; place-items: center; flex: none; width: 32px; height: 32px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--fb-muted); cursor: pointer; }
+.btn:hover { background: var(--fb-hover); color: var(--fb-text); }
+.btn:active { background: var(--fb-press); }
+.btn:disabled { color: var(--fb-muted); opacity: .4; background: none; cursor: default; }
+.btn:focus-visible, .lock:focus-visible, .x:focus-visible, .new:focus-visible { outline: 2px solid var(--fb-accent); outline-offset: -2px; }
+.reload .stop, :host([loading]) .reload .go { display: none; }
+:host([loading]) .reload .stop { display: block; }
+
+/* ---------- address field ---------- */
+.omni { display: flex; align-items: center; flex: 1; min-width: 0; height: 32px; margin: 0 0 0 6px; padding: 0 14px 0 4px; border-radius: 16px; background: var(--fb-omni); }
+.omni:hover { background: var(--fb-omni-hover); }
+.omni:has(input:focus) { background: var(--fb-bar); box-shadow: inset 0 0 0 2px var(--fb-accent); }
+.lock { display: grid; place-items: center; flex: none; width: 26px; height: 26px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--fb-muted); cursor: pointer; }
+.lock:hover { background: var(--fb-press); }
+.lock svg { width: 15px; height: 15px; }
+.field { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; height: 100%; margin-left: 6px; cursor: text; }
+input { width: 100%; height: 100%; margin: 0; padding: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 14px; color: var(--fb-text); caret-color: var(--fb-accent); }
+/* Unfocused, the field shows the address with its host picked out (the
+   overlay below); focused, the plain editable text. */
+input:not(:focus) { color: transparent; }
+input::selection { background: color-mix(in srgb, var(--fb-accent) 30%, transparent); }
+.url { position: absolute; inset: 0; display: flex; align-items: center; overflow: hidden; white-space: nowrap; font-size: 14px; color: var(--fb-muted); pointer-events: none; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); }
+.url .w, .url .h { color: var(--fb-text); }
+input:focus + .url { visibility: hidden; }
+
+/* ---------- site information ---------- */
+.pop { position: fixed; inset: auto; top: calc(var(--fbar-h, 75px) - 4px); left: 88px; width: 330px; max-width: calc(100vw - 16px); margin: 0; padding: 16px 18px 6px; border: 0; border-radius: 8px; background: var(--fb-bar); color: var(--fb-text); font: inherit; box-shadow: 0 1px 3px rgba(0, 0, 0, .2), 0 8px 28px rgba(0, 0, 0, .22); }
+.pop-h { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 14px; }
+.pop-h svg { width: 16px; height: 16px; color: var(--fb-muted); }
+.pop p { margin: 0 0 10px; line-height: 1.45; color: var(--fb-muted); }
+.pop .cert { padding-top: 10px; border-top: 1px solid var(--fb-line); font-size: 12px; }
+.pop b { font-weight: 600; color: var(--fb-text); }
+
+/* ---------- phones: one row, like a mobile browser ---------- */
+@media (max-width: 640px), (max-height: 480px) {
+  .tabs, .fwd { display: none; }
+  .tool { height: 49px; gap: 0; padding: 0 4px 1px; }
+  .btn { width: 40px; height: 40px; }
+  .btn svg { width: 22px; height: 22px; }
+  .omni { height: 38px; margin: 0 2px; padding-right: 12px; border-radius: 19px; }
+  /* 16px keeps iOS from zooming in when the field is tapped. */
+  input, .url { font-size: 16px; }
+  /* Just the site's name until the field is tapped, as phone browsers do. */
+  .url .s, .url .w, .url .p { display: none; }
+  .pop { left: 8px; right: 8px; width: auto; }
+}
