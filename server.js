@@ -3,8 +3,8 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { streamText, completeText, generateImage, extractJSON, config, onUsage } from "./lib/llm.js";
-import { imageSpec, imageKey, imageQuery, SHAPES, NEWS_STYLES } from "./lib/images.js";
+import { streamText, completeText, generateImage, draftSVG, extractJSON, config, onUsage, FAST_ROUTE } from "./lib/llm.js";
+import { imageSpec, imageKey, imageQuery, sketchSVG, sketchCSS, SHAPES, NEWS_STYLES } from "./lib/images.js";
 import {
   mapsResultsPrompt, timelineResultsPrompt, searchShardPrompt, newsShardPrompt, imageShardPrompt, overviewPrompt,
   SEARCH_ANGLES, NEWS_ANGLES, IMAGE_ANGLES,
@@ -42,7 +42,7 @@ const pageCache = new Map(); // "/domain.tld/path" -> full HTML
 const serpCache = new Map(); // "<tab>:<query>" -> full HTML
 const imageCache = new Map(); // imageKey(spec) -> { mime, buf }
 const inflight = new Map(); // page path -> live generation entry (chunks so far)
-const imageInflight = new Map(); // imageKey(spec) -> Promise<{mime, buf}>
+const imageInflight = new Map(); // imageKey(spec) -> picture job (see imageJob)
 const siteContext = new Map(); // domain -> { query, title } from first visit
 // Carts, logins, comments and form submissions on the fake sites.
 const siteState = createState({ reply: replyWriter(completeText) });
@@ -216,8 +216,6 @@ body { font-family: arial, sans-serif; color: #202124; }
 .nsnip { font-size: 13px; color: #4d5156; line-height: 1.4; }
 .nage { font-size: 12px; color: #70757a; margin-top: 6px; }
 .nthumb { width: 112px; height: 112px; border-radius: 8px; object-fit: cover; background: #f1f3f4; flex-shrink: 0; }
-.nthumb, .tile img { opacity: 0; transition: opacity .5s; }
-.nthumb.ld, .tile img.ld { opacity: 1; }
 .grid { margin: 20px 20px 60px 182px; display: flex; flex-wrap: wrap; gap: 18px 12px; max-width: 1180px; align-items: flex-start; }
 .grid::after { content: ""; flex: 1e4 1 0; }
 .tile { flex: 1.333 1 240px; min-width: 0; text-decoration: none; color: inherit; }
@@ -236,8 +234,7 @@ body { font-family: arial, sans-serif; color: #202124; }
 .pmeta, .pblurb { font-size: 14px; color: #4d5156; line-height: 1.45; }
 .pmeta .open { color: #188038; } .pmeta .closed { color: #d93025; }
 .pblurb { font-style: italic; margin-top: 4px; }
-.map { order: 2; flex: 0 0 480px; height: 400px; position: sticky; top: 20px; border-radius: 12px; border: 1px solid #dadce0; background: #f1f3f4; object-fit: cover; opacity: 0; transition: opacity .5s; }
-.map.ld { opacity: 1; }
+.map { order: 2; flex: 0 0 480px; height: 400px; position: sticky; top: 20px; border-radius: 12px; border: 1px solid #dadce0; background: #f1f3f4; object-fit: cover; }
 .timeline { margin: 26px 20px 60px 182px; max-width: 640px; border-left: 2px solid #dadce0; padding-left: 26px; }
 .event { position: relative; display: block; margin-bottom: 26px; text-decoration: none; color: inherit; }
 .event::before { content: ""; position: absolute; left: -34px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #1a73e8; }
@@ -444,7 +441,7 @@ function renderNewsItem(query, n) {
   const href = webHref(query, { url, title: n.headline, snippet: n.snippet });
   const pic = n.image && imageSpec(normalizeImagePrompt(n.image), { s: NEWS_STYLES.includes(n.style) ? n.style : "photo", a: "square" });
   if (pic) warmImage(pic);
-  const thumb = pic ? `<img class="nthumb" src="${esc(imgSrc(n.image, pic))}" loading="lazy" onload="this.classList.add('ld')" alt="">` : "";
+  const thumb = pic ? `<img class="nthumb" src="${esc(imgSrc(n.image, pic))}" style="background:${esc(sketchCSS(pic))}" loading="lazy" alt="">` : "";
   return `<a class="ncard" href="${esc(href)}">
   <div><div class="nsrc">${esc(n.outlet)}</div><div class="nhead">${esc(n.headline)}</div><div class="nsnip">${esc(n.snippet)}</div><div class="nage">${esc(n.age ?? "")}</div></div>
   ${thumb}
@@ -454,6 +451,8 @@ function renderNewsItem(query, n) {
 
 // Tiles keep their picture's aspect ratio and grow in proportion to it, so
 // each row of the grid is one height and fills the width, like Google Images.
+// Until its picture paints in (see /img), a tile shows its sketch: the
+// picture's colours, out of focus.
 const TILE_HEIGHT = 180;
 function renderImageTile(query, t) {
   const pic = imageSpec(normalizeImagePrompt(t.image), { s: t.style, a: t.shape });
@@ -462,7 +461,7 @@ function renderImageTile(query, t) {
   const url = `https://${t.site}${t.path?.startsWith("/") ? t.path : `/${t.path ?? ""}`}`;
   const href = webHref(query, { url, title: t.caption });
   return `<a class="tile" href="${esc(href)}" style="flex:${(w / h).toFixed(3)} 1 ${Math.round((TILE_HEIGHT * w) / h)}px">
-  <img src="${esc(imgSrc(t.image, pic))}" style="aspect-ratio:${w}/${h}" loading="lazy" onload="this.classList.add('ld')" alt="${esc(t.caption)}">
+  <img src="${esc(imgSrc(t.image, pic))}" style="aspect-ratio:${w}/${h};background:${esc(sketchCSS(pic))}" loading="lazy" alt="${esc(t.caption)}">
   <div class="tcap">${esc(t.caption)}</div><div class="tsite">${esc(t.site)}</div>
 </a>
 `;
@@ -512,7 +511,7 @@ const mapsHeader = (query) => {
   const prompt = `Top-down street map of the neighborhood for "${query}": a few streets and blocks, a park or river, and pins marked A to F`;
   const pic = imageSpec(prompt, { s: "map", a: "landscape" });
   warmImage(pic);
-  return `<div class="maps"><img class="map" src="${esc(imgSrc(prompt, pic))}" onload="this.classList.add('ld')" alt="Map">`;
+  return `<div class="maps"><img class="map" src="${esc(imgSrc(prompt, pic))}" style="background:${esc(sketchCSS(pic))}" alt="Map">`;
 };
 
 const statsLine = (query, page) =>
@@ -529,18 +528,18 @@ function pager(href, query, page) {
 }
 
 // ---------- generic streamed results route ----------
-function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, renderItem, validate, dedupeKey, header = () => "", footer = () => "", paged = false, aside, lead, prefetch, realSites = false }) {
+function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, renderItem, validate, dedupeKey, header = () => "", footer = () => "", paged = false, aside, lead, prefetch, realSites = false, provider }) {
   const shards = shardPrompt ? Math.min(SHARDS, angles.length) : 1;
 
   // With realSites, a query naming a known site gets it as a code-built top
   // result and the shards are told it's taken; otherwise the first shard may
   // put a real site it recognises first (marked "real").
   const itemStream = (query, page, known) => {
-    if (shards < 2) return streamJSONL(prompt(query, { page }));
+    if (shards < 2) return streamJSONL({ ...prompt(query, { page }), provider });
     const real = (i) => (!realSites ? null : known ? { taken: { name: known.site.name, host: known.site.host } } : page === 1 && i === 0 ? "allow" : null);
     return mergeAsync(
       shardCounts(total, shards).map((count, i) =>
-        streamJSONL(shardPrompt(query, { count, angle: angles[i % angles.length], page, real: real(i) }), count * 140 + 150),
+        streamJSONL({ ...shardPrompt(query, { count, angle: angles[i % angles.length], page, real: real(i) }), provider }, count * 140 + 150),
       ),
     );
   };
@@ -840,6 +839,9 @@ app.get(
     renderItem: renderImageTile,
     validate: (t) => t.site && t.image,
     dedupeKey: (t) => `${t.site}|${t.caption}`,
+    // Each tile's picture starts the moment its line lands, so the sooner
+    // the lines, the sooner the pictures.
+    provider: FAST_ROUTE,
   }),
 );
 
@@ -884,42 +886,108 @@ function diskPutImage(prompt, img) {
     .catch((err) => console.warn(`[image] disk cache write failed:`, err.message));
 }
 
-function getImage(spec) {
+// One job per picture being read from disk or drawn, shared by /img requests,
+// result thumbnails and the page-stream scanner. While the model draws it,
+// `draft` is the picture so far (draftSVG in lib/llm.js) and each new draft
+// goes to `watchers`: browsers watching it paint in (see paintImage). `ticket`
+// is its place in the queue for the model (lib/llm.js): a picture nobody is
+// waiting for yet (`urgent: false`) moves up once someone is.
+const DRAFT_MS = 250; // at most four drafts a second
+function imageJob(spec, { urgent = true } = {}) {
   const key = imageKey(spec);
-  const cached = imageCache.get(key);
-  if (cached) return Promise.resolve(cached);
-  let task = imageInflight.get(key);
-  if (!task) {
-    task = (async () => {
-      const disk = await diskGetImage(key);
-      if (disk) {
-        cachePut(imageCache, key, disk, IMG_CACHE_MAX);
-        return disk;
-      }
-      console.log(`[image] ${spec.style}/${spec.shape} ${spec.description.slice(0, 70)}`);
-      const img = await generateImage(spec);
-      cachePut(imageCache, key, img, IMG_CACHE_MAX);
-      diskPutImage(key, img);
-      return img;
-    })();
-    imageInflight.set(key, task);
-    // .finally() forks a new promise chain — give it its own catch or a
-    // failed generation becomes an unhandled rejection and kills the process.
-    task.finally(() => imageInflight.delete(key)).catch(() => {});
+  let job = imageInflight.get(key);
+  if (job) {
+    if (urgent) job.ticket.urgent = true;
+    return job;
   }
-  return task;
+  job = { draft: null, watchers: new Set(), ticket: { urgent } };
+  job.done = (async () => {
+    const disk = await diskGetImage(key);
+    if (disk) {
+      cachePut(imageCache, key, disk, IMG_CACHE_MAX);
+      return disk;
+    }
+    console.log(`[image] ${spec.style}/${spec.shape} ${spec.description.slice(0, 70)}`);
+    const t0 = Date.now();
+    const secs = (t) => `${((t - t0) / 1000).toFixed(1)}s`;
+    let drafted = 0;
+    let firstDraft = null;
+    const img = await generateImage(spec, {
+      ticket: job.ticket,
+      onText: (text) => {
+        if (Date.now() - drafted < DRAFT_MS) return;
+        drafted = Date.now();
+        const draft = draftSVG(text);
+        if (!draft || draft === job.draft) return;
+        firstDraft ??= drafted;
+        job.draft = draft;
+        for (const watch of job.watchers) watch(draft);
+      },
+    });
+    console.log(`[image] drew ${spec.style}/${spec.shape} in ${secs(Date.now())}${firstDraft ? `, first draft at ${secs(firstDraft)}` : ""} (${img.buf.length} bytes)`);
+    cachePut(imageCache, key, img, IMG_CACHE_MAX);
+    diskPutImage(key, img);
+    return img;
+  })();
+  imageInflight.set(key, job);
+  // .finally() forks a new promise chain — give it its own catch or a
+  // failed generation becomes an unhandled rejection and kills the process.
+  job.done.finally(() => imageInflight.delete(key)).catch(() => {});
+  return job;
+}
+
+function getImage(spec, opts) {
+  const cached = imageCache.get(imageKey(spec));
+  return cached ? Promise.resolve(cached) : imageJob(spec, opts).done;
 }
 
 // Start generating before the browser ever requests the image. `query` is
 // built from the same description and query as the src, so the warmed image
-// is the one the browser will ask for.
-const warmImage = (spec) => {
-  if (spec.description && config.apiKey) getImage(spec).catch(() => {});
+// is the one the browser will ask for. `urgent: false` for pictures nobody
+// may look at (a prefetched page's).
+const warmImage = (spec, opts) => {
+  if (spec.description && config.apiKey) getImage(spec, opts).catch(() => {});
 };
 
 function placeholderSVG(prompt) {
   const hue = [...prompt].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},45%,82%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360},40%,68%)"/></linearGradient></defs><rect width="800" height="600" fill="url(#g)"/></svg>`;
+}
+
+// A picture still being drawn paints itself in wherever a browser shows it
+// (an <img>, a CSS background): a multipart/x-mixed-replace response, each
+// part replacing the one before. First a sketch in the medium's colours
+// (sketchSVG in lib/images.js), then every new draft, then the picture.
+// Chrome, Firefox and Safari show each part of an <img> as it arrives
+// (Safari shows only the last of a CSS background). Every part is sanitized
+// like a finished picture. Anything that isn't an image load (a fetch, the
+// SVG opened as a page) waits for the finished picture instead.
+const BOUNDARY = "foogle-picture";
+// Each part ends with the boundary: browsers show a part once they see the
+// boundary after it, so one that led the next part would show a frame late.
+const framePart = (svg, last = false) => Buffer.concat([
+  Buffer.from(`Content-Type: image/svg+xml\r\nContent-Length: ${Buffer.byteLength(svg)}\r\n\r\n`),
+  Buffer.from(svg),
+  Buffer.from(`\r\n--${BOUNDARY}${last ? "--" : ""}\r\n`),
+]);
+
+function paintImage(spec, res) {
+  const job = imageJob(spec);
+  res.writeHead(200, { "Content-Type": `multipart/x-mixed-replace; boundary=${BOUNDARY}`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+  const send = (svg) => res.write(framePart(svg));
+  res.write(`--${BOUNDARY}\r\n`);
+  send(job.draft ?? sketchSVG(spec));
+  job.watchers.add(send);
+  res.on("close", () => job.watchers.delete(send));
+  job.done
+    .then((img) => img.buf, (err) => {
+      console.error(`[image] failed:`, err.message);
+      return placeholderSVG(spec.description);
+    })
+    .then((svg) => {
+      job.watchers.delete(send);
+      if (!res.destroyed) res.end(framePart(svg, true));
+    });
 }
 
 // ?s=&a= pick the picture's medium and shape; ?bg=&fg= carry a generated
@@ -932,7 +1000,9 @@ app.use("/img", async (req, res) => {
   res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
   const spec = imageSpec(prompt, req.query);
   const key = imageKey(spec);
-  if (!imageCache.has(key) && !imageInflight.has(key) && !(await isImageOnDisk(key)) && !limits.allow(req, res, "img")) return;
+  const drawing = !imageCache.has(key) && !(await isImageOnDisk(key));
+  if (drawing && !imageInflight.has(key) && !limits.allow(req, res, "img")) return;
+  if (drawing && !imageCache.has(key) && req.get("sec-fetch-dest") === "image") return paintImage(spec, res);
 
   try {
     const img = await getImage(spec);
@@ -997,7 +1067,9 @@ function startPageGeneration(webPath, promptArgs) {
       for (const [src, p, q = ""] of acc.matchAll(/\/img\/([^"'\s<>)?]+)(?:(\?[^"'\s<>]*)(?=["'\s<>])|(?=["'\s<>)]))/g)) {
         if (!seenImgs.has(src)) {
           seenImgs.add(src);
-          warmImage(imageSpec(normalizeImagePrompt(p), Object.fromEntries(new URLSearchParams(q.replaceAll("&amp;", "&")))));
+          // Nobody may be looking yet (a prefetched page): the browser's
+          // request moves it up.
+          warmImage(imageSpec(normalizeImagePrompt(p), Object.fromEntries(new URLSearchParams(q.replaceAll("&amp;", "&")))), { urgent: false });
         }
       }
     };

@@ -169,6 +169,40 @@ What makes it fast is not the model so much as the browser: every list it fetche
 
 **Cost and limits.** A typed query costs ~$0.001 of model calls, about a seventh of a search ($0.007), and nothing when someone has typed it before. Each generated list is charged to the visitor as `suggest` ($0.00003) or `suggestLong` ($0.00025) in `lib/limits.js`, so the default $0.10 burst covers ~70 typed queries on top of searching; lists from the cache are free. Over a limit, or over the day's budget, `/api/suggest` answers with no suggestions (429/503 and `Retry-After`) and the browser asks for nothing until then: the box just has no dropdown. A model that fails or takes over 2.5s gives no suggestions either.
 
+## Images: pictures in half the time, painting themselves in
+
+Measured 2026-09-23 on cold Images pages (fresh server, empty image cache) in Chromium at 1280×800, three queries ("tide pools", "vintage typewriters", "mars colony"), before and after, alternating runs.
+
+Where the time went: each picture's result line arrived at 1.3-4s and its generation started then (the server already warmed pictures as lines landed, and at desktop size the browser asked for every picture at once, lazy loading or not). Time to first token was ~0.7s. The rest was writing: a median of ~900 output tokens (charts ~580, pixel art ~670, woodcuts ~650; photos, diagrams, screenshots and posters ~1000) at ~123 tokens/s on OpenAI's endpoint, which is where OpenRouter sent every request. The system prompt is 290-440 tokens, under OpenAI's 1024-token minimum for prompt caching (`cached_tokens` was always 0), and prefill isn't the bottleneck anyway.
+
+| 12 concurrent pictures, same 12 specs | Median picture | Time to first token (p50) | Tokens/s (p50) | $ per 12 |
+|---|---:|---:|---:|---:|
+| default routing (OpenAI) | 8.0-8.3s | 0.8s | 123 | $0.0054-0.0057 |
+| `provider.sort: "throughput"` (Azure) | 4.3-4.6s | 0.9-1.0s | 261-265 | $0.0055 |
+| OpenAI "fast" tier | 4.7s (one took 19.8s) | 0.8s | — | double |
+| Mercury 2.5 (diffusion model) | 1.6s | 0.7s | ~900 | $0.0018 |
+
+Luna on Azure is the same model at the same price, twice as fast. Over 48 more requests its time to first token was p50 1.1s, p90 3.0s, max 3.4s; OpenAI sorted by latency was p50 5.3s at the time. For the Images result lines (3 shards of 4), throughput routing put the last line at 2.0-2.3s against 3.8-5.5s for the default and 3.0-3.3s sorted by latency. Mercury lost a blind side-by-side of the same 12 pictures 0-12 (and two of its pictures were broken: a runaway pixel-art grid and a solid black woodcut), so pictures stay on Luna. A brief asking to set shared attributes once on a `<g>` didn't shorten anything (median 862-919 tokens against 869-934), and the SVGs are already compact: fewer tokens would mean less picture.
+
+What changed:
+
+- **Routing.** Pictures and the Images result shards ask OpenRouter for the fastest provider (`FAST_ROUTE` in `lib/llm.js`), leaving out OpenAI's flex tier (cheaper, but can queue for many seconds) and fast tier (double the price, no faster).
+- **Pictures stream and paint in.** An `<img>` asking for a picture still being drawn gets `multipart/x-mixed-replace`: a sketch of its colours right away, a sanitized draft of the SVG so far (complete tags, open elements closed) up to four times a second, then the picture. Chrome, Firefox and Safari all repaint an `<img>` for each part, as long as the boundary follows each part rather than leading the next (otherwise every part shows one part late). Defs come first (13-43% of the text), then the backdrop, so a real picture starts appearing ~2s after its line.
+- **Sketches in the page.** Image, News and Maps results carry the same sketch as a CSS background, so a tile has colour the moment its line lands, even before a browser connection frees up for its picture (plain HTTP/1.1 allows 6 per host; the Render deployment speaks HTTP/2).
+- **Queue.** 24 pictures at once instead of 12, and a picture someone is waiting for goes ahead of one for a prefetched page.
+- **Repair.** Drafts and finished pictures are rebuilt with balanced tags, so a picture with one mismatched closer (`<path …>SAME ROCK,</text>`, 1 of 205 in these runs) draws instead of rendering blank. The 204 well-formed ones come through byte for byte.
+
+| Cold Images page, 12 pictures (3 queries) | Before | After |
+|---|---:|---:|
+| First picture on screen | 8.8-9.7s | 1.1-1.3s (sketch), 3.0-3.2s (drawing) |
+| First picture finished | 8.8-9.7s | 5.2-5.3s |
+| All pictures finished | 13.6-14.1s | 7.9-11.2s |
+| Per picture, line to finished: median / p90 | 8.4s / 10.2s | 4.5s / 5.9s |
+| Three Images pages at once (36 pictures): all finished / median | 27.5s / 13.4s | 11.7s / 5.2s |
+| News page (8 thumbnails): first on screen / all finished | 8.8s / 14.4s | 1.7s sketch, 3.3s drawing / 9.6s |
+
+The cost is unchanged: ~$0.0061 per Images page (12 pictures ~$0.0055, shards ~$0.0006). What's left is the odd slow stream: the 11th of 12 pictures finished at 7.7-8.8s, and one slower picture set the "all finished" time.
+
 ## Live references
 
 - [OpenRouter model catalog](https://openrouter.ai/api/v1/models) — exact IDs and prices were checked before trials.

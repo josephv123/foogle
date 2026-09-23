@@ -29,17 +29,20 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
         return sse("- The greenhouse glazier is Ada Moss.\\nGlass costs $38 a pane.");
       }
       if (system.includes("image index")) {
+        console.log("IMAGES_ROUTE=" + p.provider?.sort);
         return sse(JSON.stringify({caption:"Greenhouse frame plans",site:"panes.example",path:"/plans",style:"blueprint",shape:"tall",image:"greenhouse frame side elevation"}) + "\\n");
       }
       if (system.includes("visitor's comment")) {
         return Response.json({choices:[{message:{content:"crumbkate: Rye first, then bread flour."},finish_reason:"stop"}]});
       }
-      if (p.stream) {
-        return sse(JSON.stringify({site:"Gardeners Guild",title:"Gardeners",url:"https://garden.example/repairs",snippet:"Greenhouse repairs",kind:"forum",meta:"4.8★ · 212 reviews"}) + "\\n");
-      }
       if (system.includes("draws in SVG")) {
         console.log("ART_PROMPT=" + JSON.stringify(p.messages[1].content));
-        return Response.json({choices:[{message:{content:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#7ab"/></svg>'},finish_reason:"stop"}]});
+        // Pictures stream (so they can paint in) and go to the fastest provider.
+        console.log("ART_ROUTE=" + JSON.stringify([p.stream, p.provider?.sort]));
+        return sse('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#7ab"/></svg>');
+      }
+      if (p.stream) {
+        return sse(JSON.stringify({site:"Gardeners Guild",title:"Gardeners",url:"https://garden.example/repairs",snippet:"Greenhouse repairs",kind:"forum",meta:"4.8★ · 212 reviews"}) + "\\n");
       }
       if (system.includes("overview writer")) {
         return Response.json({choices:[{message:{content:JSON.stringify({title:"Greenhouses",summary:"Reglaze cracked panes in spring.",ask:[{q:"How long does glazing last?",a:"About 20 years."}],related:["cold frames"]})},finish_reason:"stop"}]});
@@ -102,11 +105,31 @@ test("default launcher uses Luna and Jev for search, pages and cached revisits",
   // keeps that shape.
   const images = await (await fetch(`${base}/images?q=greenhouse`)).text();
   assert.match(images, /src="\/img\/greenhouse%20frame%20side%20elevation\?s=blueprint&amp;a=tall"/);
-  assert.match(images, /style="aspect-ratio:280\/420"/);
+  // Until its picture paints in, a tile shows the picture's colours, out of focus.
+  assert.match(images, /style="aspect-ratio:280\/420;background:radial-gradient\([^"]*linear-gradient\(#1f4f8f, #163a6a\)"/);
   const drawn = await fetch(`${base}/img/greenhouse%20frame%20side%20elevation?s=blueprint&a=tall`);
   assert.match(drawn.headers.get("content-security-policy"), /default-src 'none'/);
   assert.match(await drawn.text(), /^<svg/);
   assert.match(output, /ART_PROMPT=.*Medium: blueprint/);
+  assert.match(output, /ART_ROUTE=\[true,"throughput"\]/);
+  assert.match(output, /IMAGES_ROUTE=throughput/);
+  assert.doesNotMatch(output, /ART_ROUTE=(?!\[true,"throughput"\])/);
+  // Asked for by an <img> while it's drawn, a picture paints itself in: a
+  // sketch in its colours, then drafts, then the picture, each part replacing
+  // the last. Once drawn, it's a plain SVG.
+  const img = { headers: { "Sec-Fetch-Dest": "image" } };
+  const painting = await fetch(`${base}/img/greenhouse%20at%20dusk?s=photo&a=square`, img);
+  assert.equal(painting.headers.get("content-type"), "multipart/x-mixed-replace; boundary=foogle-picture");
+  assert.equal(painting.headers.get("cache-control"), "no-store");
+  assert.match(painting.headers.get("content-security-policy"), /default-src 'none'/);
+  // Each part is followed by the boundary, so a browser shows it at once.
+  const parts = (await painting.text()).split("--foogle-picture");
+  assert.ok(parts.length >= 4 && parts[0] === "" && parts.at(-1) === "--\r\n");
+  assert.match(parts[1], /^\r\nContent-Type: image\/svg\+xml\r\nContent-Length: \d+\r\n\r\n<svg [^>]*viewBox="0 0 400 400">[\s\S]*<animate [\s\S]*<\/svg>\r\n$/);
+  assert.match(parts.at(-2), /\r\n\r\n<svg xmlns="http:\/\/www.w3.org\/2000\/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="#7ab"\/><\/svg>\r\n$/);
+  const painted = await fetch(`${base}/img/greenhouse%20at%20dusk?s=photo&a=square`, img);
+  assert.equal(painted.headers.get("content-type"), "image/svg+xml");
+  assert.match(await painted.text(), /^<svg/);
   // An old-style bare /img URL still draws, in a style its description names.
   const bare = await fetch(`${base}/img/pixel%20art%20of%20a%20greenhouse`);
   assert.equal(bare.status, 200);
