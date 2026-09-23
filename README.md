@@ -69,7 +69,9 @@ Set any of the first three to `off` to disable it. Behind a proxy you must set `
 
 ## Deploy
 
-Foogle deploys to Render's free web service tier from [`render.yaml`](render.yaml), a Render Blueprint. It builds with `npm ci`, starts with `npm start` on Node 22, health-checks `/` and redeploys on every push to `main`.
+Foogle deploys to Render's free web service tier from [`render.yaml`](render.yaml), a Render Blueprint. It builds with `npm ci`, starts with `npm start` on Node 22 and health-checks `/`.
+
+CI deploys each push to `main` to Render once the tests pass, then waits for that commit to go live and checks the site answers 200.
 
 1. Create a dedicated OpenRouter key for the deployment at [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys). Give it a **credit limit** (a few dollars), so a runaway bill is impossible, and **no expiration date or a distant one**, so the site doesn't stop working without warning.
 2. In the [Render dashboard](https://dashboard.render.com), click **New > Blueprint** and pick this repo (connect GitHub first if asked).
