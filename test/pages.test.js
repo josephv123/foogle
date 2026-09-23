@@ -36,7 +36,7 @@ test("Jev sends the documented request and rejects provider failures", async () 
   } });
   assert.deepEqual(actual, plan);
   assert.equal(sent.model, "jev-latest");
-  assert.deepEqual(Object.keys(sent.questions), ["kind", ...STYLE_KEYS.map((k) => `style_${k}`)]);
+  assert.deepEqual(Object.keys(sent.questions), ["kind", ...STYLE_KEYS.map((k) => `style_${k}`), "real_site"]);
   assert.ok(Object.values(sent.questions).slice(1).every((q) => q.type === "noul"));
   await assert.rejects(jevPlan(args, { apiKey: "test", fetchImpl: async () => ({ ok: false, status: 429 }) }), /Jev HTTP 429/);
 });
