@@ -29,3 +29,91 @@ jobs:
       - run: npm ci
       # The tests stub fetch, so they need no API keys and never reach OpenRouter or Jev.
       - run: npm test
+
+  # Render never hears about new commits (the service was created from the public repo URL),
+  # so once both test legs pass on main, ask it to deploy this exact commit and wait until it's live.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # A newer push to main supersedes an older deploy job. Render still finishes (or replaces)
+    # whatever it had started, and the newer job waits for its own commit to go live.
+    concurrency:
+      group: render-deploy
+      cancel-in-progress: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      RENDER_SERVICE_ID: srv-dapkrrjbc2fs73b3gkdg
+      SITE_URL: https://foogle-slu3.onrender.com
+    steps:
+      - name: Trigger Render deploy
+        id: trigger
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::error::RENDER_API_KEY secret is not set"
+            exit 1
+          fi
+          api="https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys"
+          body="$RUNNER_TEMP/deploy.json"
+          code=$(curl -sS -o "$body" -w '%{http_code}' -X POST "$api" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg sha "$GITHUB_SHA" '{commitId: $sha}')")
+          echo "Render answered HTTP $code"
+          case "$code" in
+            201|202) ;;
+            *) echo "::error::Render refused the deploy (HTTP $code): $(cat "$body")"; exit 1 ;;
+          esac
+          deploy_id=$(jq -r '.id // empty' "$body" 2>/dev/null || true)
+          # A 202 means Render queued the deploy behind one in progress and may not return it,
+          # so find it by commit instead.
+          for _ in 1 2 3 4 5 6; do
+            [ -n "$deploy_id" ] && break
+            sleep 5
+            deploy_id=$(curl -sS --fail "$api?limit=20" \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Accept: application/json" |
+              jq -r --arg sha "$GITHUB_SHA" '[.[].deploy | select(.commit.id == $sha)][0].id // empty') || true
+          done
+          if [ -z "$deploy_id" ]; then
+            echo "::error::Render accepted the deploy but no deploy of $GITHUB_SHA showed up"
+            exit 1
+          fi
+          echo "Render deploy $deploy_id is for $GITHUB_SHA"
+          echo "deploy_id=$deploy_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the deploy to go live
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          DEPLOY_ID: ${{ steps.trigger.outputs.deploy_id }}
+        run: |
+          # Poll every 10s for up to 10 minutes.
+          for _ in $(seq 60); do
+            status=$(curl -sS --fail \
+              "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys/$DEPLOY_ID" \
+              -H "Authorization: Bearer $RENDER_API_KEY" \
+              -H "Accept: application/json" | jq -r '.status') || status="unknown (request failed)"
+            echo "$(date -u +%H:%M:%S) $status"
+            case "$status" in
+              live) exit 0 ;;
+              build_failed|update_failed|pre_deploy_failed|canceled|deactivated)
+                echo "::error::Render deploy $DEPLOY_ID ended as $status"
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Render deploy $DEPLOY_ID was not live after 10 minutes"
+          exit 1
+
+      - name: Check the site responds
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --retry 5 --retry-delay 10 --retry-all-errors \
+            --max-time 60 "$SITE_URL/") || true
+          echo "GET $SITE_URL/ -> $code"
+          [ "$code" = 200 ] || { echo "::error::Expected 200 from $SITE_URL/, got $code"; exit 1; }
