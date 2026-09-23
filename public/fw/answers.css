@@ -1,0 +1,252 @@
+/* Instant-answer cards and "Did you mean" on the All tab (lib/answer-cards.js).
+   A card's slot takes its size from the card's class the moment the
+   placeholder goes in, so the results below don't move when it fills. */
+
+/* Full width: on phones the results column shrinks its children to fit. */
+.ia.ld, .ia.wait { margin: 18px 0 6px; width: 100%; max-width: 600px; }
+.ia.grow { animation: ia-grow .45s ease-out both; overflow: hidden; }
+@keyframes ia-grow { from { max-height: 0; opacity: 0; } to { max-height: 900px; opacity: 1; } }
+.ia.ld .ia-card { animation: ia-in .25s ease-out both; }
+@keyframes ia-in { from { opacity: .3; } }
+/* A card replaces the result count line, as on Google. */
+#ia.ld ~ .stats, #ia.wait ~ .stats { display: none; }
+
+.dym { width: 100%; max-width: 600px; }
+.dym.wait { min-height: 45px; }
+.dym-line { margin: 18px 0 0; font-size: 18px; color: #d93025; line-height: 27px; }
+.dym-line a { color: #1a0dab; text-decoration: none; }
+.dym-line a:hover { text-decoration: underline; }
+.dym-line b { font-weight: bold; }
+
+.ia-card { position: relative; border: 1px solid #dadce0; border-radius: 8px; padding: 16px 20px 12px; background: #fff; color: #202124; font-family: arial, sans-serif; font-size: 14px; }
+.ia-card button, .ia-card input, .ia-card select { font-family: inherit; color: inherit; }
+.ia-card:focus { outline: none; }
+.ia-card:focus-visible { box-shadow: 0 0 0 2px #1a73e8; }
+.ia-skel { overflow: hidden; }
+.ia-skel .bar { margin-bottom: 16px; }
+.ia-meta { font-size: 12px; color: #70757a; line-height: 1.5; }
+.ia-label { font-size: 14px; color: #70757a; }
+.ia-label b { color: #202124; font-weight: normal; }
+.ia-sub { font-size: 14px; margin: 16px 0 4px; }
+.ia-foot { display: flex; justify-content: flex-end; margin-top: 10px; font-size: 12px; }
+.ia-foot a { color: #70757a; text-decoration: none; }
+.ia-foot a:hover { text-decoration: underline; }
+
+/* Reserved heights: a placeholder and its card are the same size. */
+.ia-weather { min-height: 424px; }
+.ia-calculator { min-height: 334px; }
+.ia-units { min-height: 210px; }
+.ia-currency { min-height: 474px; }
+.ia-stock { min-height: 498px; }
+.ia-dictionary { min-height: 400px; }
+.ia-time { min-height: 162px; }
+.ia-sports { min-height: 450px; }
+.ia-flight { min-height: 246px; }
+
+/* ---------- tabs and charts ---------- */
+.ia-tabs { display: flex; border-bottom: 1px solid #ebebeb; margin: 14px 0 6px; overflow-x: auto; scrollbar-width: none; }
+.ia-tabs button { flex-shrink: 0; background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 12px 7px; font-size: 14px; color: #5f6368; cursor: pointer; }
+.ia-tabs button:hover { color: #202124; }
+.ia-tabs button[aria-selected="true"] { color: #1a73e8; border-bottom-color: #1a73e8; }
+.ia-chart { position: relative; height: 170px; margin: 22px 8px 30px 48px; touch-action: pan-y; }
+.ia-plot { position: absolute; inset: 0; }
+.ia-chart svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.ia-chart svg .l { stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.ia-chart svg .g { stroke: #ebebeb; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ia-chart svg .b { stroke: #9aa0a6; stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.ia-chart .yl { position: absolute; right: calc(100% + 8px); transform: translateY(-50%); font-size: 12px; color: #70757a; white-space: nowrap; }
+.ia-chart .xl { position: absolute; top: calc(100% + 8px); transform: translateX(-50%); font-size: 12px; color: #70757a; white-space: nowrap; }
+.ia-chart .bl { position: absolute; right: 0; transform: translateY(-130%); font-size: 11px; color: #70757a; background: rgba(255, 255, 255, .85); padding: 0 2px; }
+.ia-cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: #9aa0a6; pointer-events: none; }
+.ia-tip { position: absolute; top: -24px; transform: translateX(-50%); background: #fff; border: 1px solid #dadce0; border-radius: 4px; box-shadow: 0 1px 3px rgba(60, 64, 67, .2); font-size: 12px; padding: 2px 7px; white-space: nowrap; pointer-events: none; }
+
+/* ---------- weather ---------- */
+.ia-where { font-size: 14px; color: #70757a; margin-bottom: 14px; }
+.ia-where b { color: #202124; font-weight: normal; }
+.ia-wx-top { display: flex; justify-content: space-between; gap: 16px; }
+.ia-wx-now { display: flex; align-items: flex-start; flex-wrap: wrap; row-gap: 6px; }
+.ia-wx-icon { width: 64px; height: 64px; margin-right: 6px; }
+.ia-wx-icon svg { display: block; width: 64px; height: 64px; }
+.ia-wx-temp { font-size: 44px; line-height: 1; margin-top: 8px; }
+.ia-wx-units { display: flex; align-items: flex-start; gap: 3px; margin-top: 10px; font-size: 14px; color: #70757a; }
+.ia-wx-units button { border: 0; background: none; padding: 0; font-size: 14px; color: #70757a; cursor: pointer; }
+.ia-wx-units button[aria-pressed="true"] { color: #202124; cursor: default; }
+.ia-wx-units button[aria-pressed="false"]:hover { text-decoration: underline; }
+.ia-wx-stats { font-size: 12px; color: #70757a; line-height: 1.55; margin: 4px 0 0 18px; }
+.ia-wx-stats span { color: #70757a; }
+.ia-wx-side { text-align: right; flex-shrink: 0; }
+.ia-wx-title { font-size: 22px; line-height: 1.2; }
+.ia-wx-when, .ia-wx-cond { font-size: 14px; color: #70757a; line-height: 1.5; }
+.ia-wx-chart { height: 76px; margin: 30px 0 30px; }
+.ia-wx-chart svg .l { stroke-width: 2; }
+.ia-wx-chart .vl { position: absolute; transform: translate(-50%, -150%); font-size: 12px; color: #70757a; }
+.ia-wx-chart .ia-bar { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.ia-wx-chart .ia-bar b { font-size: 11px; font-weight: normal; color: #70757a; margin-bottom: 3px; white-space: nowrap; }
+.ia-wx-chart .ia-bar i { display: block; width: 56%; border-radius: 2px 2px 0 0; }
+.ia-wx-chart .ia-bar i.precip { background: #8ab4f8; }
+.ia-wx-chart .ia-bar i.wind { background: #dadce0; }
+.ia-wx-days { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: 0 -8px; }
+.ia-wx-day { flex: 1 0 62px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px 8px; border: 0; border-radius: 8px; background: none; font-size: 13px; cursor: pointer; }
+.ia-wx-day:hover { background: #f8f9fa; }
+.ia-wx-day[aria-selected="true"] { background: #f1f3f4; }
+.ia-wx-day .ic svg { display: block; }
+.ia-wx-day .lo { color: #70757a; }
+
+/* ---------- calculator ---------- */
+.ia-calc-screen { border: 1px solid #dadce0; border-radius: 8px; padding: 10px 14px 8px; text-align: right; margin-bottom: 12px; overflow: hidden; }
+.ia-calc-top { font-size: 12px; color: #70757a; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ia-calc-main { font-size: 30px; line-height: 44px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ia-keys { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.ia-keys button { height: 36px; min-width: 0; border: 0; border-radius: 4px; background: #f1f3f4; font-size: 14px; cursor: pointer; padding: 0; }
+.ia-keys button.fn { background: #dadce0; }
+.ia-keys button.eq { background: #4285f4; color: #fff; }
+.ia-keys button:hover { filter: brightness(.96); }
+.ia-keys button:active { filter: brightness(.88); }
+.ia-keys button[data-k="rad"], .ia-keys button[data-k="deg"] { color: #70757a; }
+.ia-keys button.on { color: #202124 !important; font-weight: bold; }
+.ia-keys sup { font-size: 9px; }
+
+/* ---------- converters ---------- */
+.ia-cat, .ia-unit, .ia-cur { font-size: 14px; padding: 7px 8px; border: 1px solid #dadce0; border-radius: 4px; background: #fff; max-width: 100%; cursor: pointer; }
+.ia-conv { display: flex; align-items: flex-start; gap: 12px; margin: 14px 0; }
+.ia-side { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ia-num { width: 100%; min-width: 0; font-size: 16px; padding: 8px 10px; border: 1px solid #dadce0; border-radius: 4px; }
+.ia-num:focus, .ia-cat:focus, .ia-unit:focus, .ia-cur:focus { outline: none; border-color: #1a73e8; box-shadow: 0 0 0 1px #1a73e8; }
+.ia-eq { font-size: 20px; padding-top: 8px; }
+.ia-formula { display: flex; align-items: baseline; gap: 12px; background: #f8f9fa; border-radius: 8px; padding: 10px 12px; }
+.ia-formula b { flex-shrink: 0; font-weight: normal; font-size: 13px; background: #feefc3; border-radius: 4px; padding: 2px 8px; }
+.ia-fx-head { color: #70757a; }
+.ia-fx-big { font-size: 36px; line-height: 1.25; }
+.ia-currency .ia-conv { flex-direction: column; gap: 8px; margin: 14px 0 4px; }
+.ia-currency .ia-side { flex-direction: row; width: 100%; }
+.ia-currency .ia-num { flex: 0 0 38%; }
+.ia-currency .ia-cur { flex: 1; min-width: 0; }
+
+/* ---------- stocks ---------- */
+.ia-stock-price { margin-top: 6px; }
+.ia-stock-price .big { font-size: 36px; }
+.ia-stock-price .cur { color: #70757a; }
+.ia-stock-change { font-size: 16px; margin: 2px 0; }
+.ia-stock-change.up { color: #137333; }
+.ia-stock-change.down { color: #a50e0e; }
+.ia-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 28px; font-size: 13px; }
+.ia-stats table { border-collapse: collapse; width: 100%; }
+.ia-stats th { text-align: left; font-weight: normal; color: #70757a; padding: 4px 0; white-space: nowrap; }
+.ia-stats td { text-align: right; padding: 4px 0 4px 8px; white-space: nowrap; }
+
+/* ---------- dictionary ---------- */
+.ia-word { font-size: 32px; margin: 10px 0 4px; }
+.ia-phon { display: flex; align-items: center; gap: 8px; color: #70757a; }
+.ia-card .ia-say { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: #f1f3f4; color: #1a73e8; cursor: pointer; }
+.ia-say:hover { background: #e8eaed; }
+.ia-pos { font-style: italic; margin: 14px 0 6px; }
+.ia-sense ol { padding-left: 24px; line-height: 1.5; }
+.ia-sense li { margin-bottom: 10px; }
+.ia-ex { color: #70757a; }
+/* One row of synonyms, scrolling sideways, so a card's height doesn't depend on them. */
+.ia-syn { display: flex; align-items: center; gap: 6px; margin-top: 6px; overflow-x: auto; scrollbar-width: none; }
+.ia-syn > * { flex-shrink: 0; }
+.ia-syn span { color: #70757a; font-size: 13px; }
+.ia-syn a { border: 1px solid #dadce0; border-radius: 16px; padding: 2px 10px; font-size: 13px; color: #202124; text-decoration: none; }
+.ia-syn a:hover { background: #f1f3f4; }
+.ia-dictionary .ia-extra { display: none; }
+.ia-dictionary.open div.ia-extra { display: block; }
+.ia-dictionary.open li.ia-extra { display: list-item; }
+.ia-origin p { color: #4d5156; line-height: 1.5; margin-top: 4px; }
+.ia-card .ia-more { display: block; width: 100%; border: 0; border-top: 1px solid #ebebeb; background: none; margin-top: 6px; padding: 12px 0 2px; font-size: 14px; color: #1a73e8; cursor: pointer; }
+.ia-more .opened, .ia-dictionary.open .ia-more .closed { display: none; }
+.ia-dictionary.open .ia-more .opened { display: inline; }
+
+/* ---------- time ---------- */
+.ia-time-big { font-size: 56px; line-height: 1.15; }
+.ia-time-date { font-size: 16px; color: #4d5156; margin-top: 4px; }
+.ia-time-where { color: #70757a; margin-top: 8px; }
+.ia-time-rel { font-size: 13px; color: #70757a; min-height: 20px; margin-top: 2px; }
+
+/* ---------- sports ---------- */
+.ia-sp-head { display: flex; align-items: center; gap: 12px; }
+.ia-sp-team { font-size: 22px; line-height: 1.25; }
+.ia-badge { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 50%; background: var(--c); color: var(--t, #fff); font-weight: bold; letter-spacing: -.3px; }
+.ia-game-meta { text-align: center; margin-top: 4px; }
+.ia-match { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 12px; }
+.ia-team { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ia-team.home, .ia-team.home .who { flex-direction: row-reverse; text-align: right; }
+.ia-team .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ia-team .ia-meta { white-space: nowrap; }
+.ia-team .nm { display: flex; flex-direction: column; min-width: 0; font-size: 14px; }
+.ia-team .short { display: none; }
+.ia-team .sc { font-size: 36px; color: #70757a; margin: 0 4px; }
+.ia-team.win .sc { color: #202124; }
+.ia-at { font-size: 13px; color: #70757a; text-align: center; flex-shrink: 0; }
+.ia-at .live { color: #d93025; font-weight: bold; }
+.ia-box { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ia-box th, .ia-box td { text-align: center; padding: 5px 2px; border-bottom: 1px solid #ebebeb; }
+.ia-box th { color: #70757a; font-weight: normal; }
+.ia-box td:first-child { text-align: left; color: #4d5156; }
+.ia-next { list-style: none; }
+.ia-next li { display: flex; align-items: baseline; gap: 12px; padding: 7px 0; border-top: 1px solid #ebebeb; }
+.ia-next .when { width: 96px; flex-shrink: 0; color: #70757a; }
+.ia-next .vs { flex: 1; }
+.ia-standings { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.ia-standings th, .ia-standings td { text-align: right; padding: 7px 4px; border-bottom: 1px solid #ebebeb; }
+.ia-standings th { color: #70757a; font-weight: normal; font-size: 13px; }
+.ia-standings th:first-child, .ia-standings td:first-child { text-align: left; }
+.ia-standings tr.me td { font-weight: bold; }
+
+/* ---------- flights ---------- */
+.ia-fl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.ia-fl-title { font-size: 20px; line-height: 1.3; }
+.ia-pill { flex-shrink: 0; font-size: 13px; padding: 4px 12px; border-radius: 14px; white-space: nowrap; }
+.ia-pill.ok { background: #e6f4ea; color: #137333; }
+.ia-pill.late, .ia-pill.bad { background: #fce8e6; color: #c5221f; }
+.ia-fl-route { display: flex; align-items: center; gap: 14px; margin: 22px 0 16px; font-size: 20px; }
+.ia-fl-route .track { flex: 1; position: relative; height: 4px; border-radius: 2px; background: #dadce0; }
+.ia-fl-route .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: #1a73e8; }
+.ia-fl-route .plane { position: absolute; top: 50%; transform: translate(-50%, -50%); color: #1a73e8; background: #fff; line-height: 0; padding: 0 2px; }
+.ia-fl-legs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ia-fl-legs .leg:last-child { text-align: right; }
+.ia-fl-legs .city { font-size: 15px; }
+.ia-fl-legs .when { margin-top: 6px; }
+.ia-fl-legs .when b { font-weight: normal; font-size: 18px; }
+.ia-fl-legs .when b.late { color: #c5221f; }
+.ia-fl-legs .gate { font-size: 13px; color: #4d5156; margin-top: 6px; }
+.ia-fl-legs .gate b { color: #202124; font-weight: normal; }
+.ia-fl-note { font-size: 13px; margin-top: 12px; color: #137333; }
+.ia-fl-note.late, .ia-fl-note.bad { color: #c5221f; }
+
+/* ---------- phones ---------- */
+@media (max-width: 700px) {
+  .ia.ld, .ia.wait, .dym { max-width: none; }
+  .ia-card { padding: 14px 14px 10px; }
+  .dym-line { font-size: 16px; }
+  .ia-weather { min-height: 490px; }
+  .ia-calculator { min-height: 308px; }
+  .ia-units { min-height: 206px; }
+  .ia-currency { min-height: 460px; }
+  .ia-stock { min-height: 582px; }
+  .ia-dictionary { min-height: 372px; }
+  .ia-time { min-height: 150px; }
+  .ia-sports { min-height: 535px; }
+  .ia-flight { min-height: 242px; }
+  .ia-wx-temp { font-size: 40px; }
+  .ia-wx-stats { margin-left: 0; flex-basis: 100%; }
+  .ia-wx-chart .xl.odd { display: none; }
+  .ia-wx-chart .ia-bar b { font-size: 10px; }
+  .ia-keys { gap: 5px; }
+  .ia-keys button { height: 34px; font-size: 13px; }
+  .ia-chart { margin-left: 44px; }
+  .ia-stats { grid-template-columns: 1fr 1fr; }
+  .ia-stats table:last-child { grid-column: span 2; }
+  .ia-time-big { font-size: 48px; }
+  .ia-fx-big { font-size: 28px; }
+  .ia-wx-day { flex: 0 0 52px; }
+  .ia-team .sc { font-size: 30px; }
+  .ia-team .nm { font-size: 13px; }
+  .ia-team .full { display: none; }
+  .ia-team .short { display: inline; }
+  .ia-team .who, .ia-team.home .who { flex-direction: column; gap: 4px; text-align: center; }
+  .ia-team .nm { align-items: center; }
+  .ia-dictionary:not(.open) .ia-second { display: none; }
+  .ia-next li { display: grid; grid-template-columns: 84px 1fr; gap: 2px 10px; }
+  .ia-next .ia-meta { grid-column: 2; }
+}

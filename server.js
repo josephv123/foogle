@@ -22,6 +22,8 @@ import {
 import { createLimits } from "./lib/limits.js";
 import { createDoodles, doodleRoutes, doodleHomepage } from "./lib/doodle.js";
 import { createSuggester, normalizeQuery, SUGGEST } from "./lib/suggest.js";
+import { createAnswers } from "./lib/answers.js";
+import { classifyQuery } from "./lib/jev.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -30,6 +32,9 @@ const PORT = process.env.PORT || 3000;
 // limits.allow() only on a cache miss, so cached responses are free.
 const limits = createLimits();
 onUsage(limits.record);
+// Instant answers and "Did you mean" above the All tab's results (lib/answers.js).
+// The model calls they make are charged to the visitor like any other.
+const answers = createAnswers({ complete: completeText, classify: classifyQuery, charge: (req, action) => limits.check(req, action).ok });
 // ---------- caches ----------
 const CACHE_MAX = 200;
 const IMG_CACHE_MAX = 60;
@@ -169,7 +174,7 @@ const TABS = [
   ["Timelines", "/timelines"],
 ];
 
-function shell(query, active, page = 1, { aside = false } = {}) {
+function shell(query, active, page = 1, { aside = false, lead = "" } = {}) {
   const q = esc(query);
   const eq = encodeURIComponent(query);
   const tabs =
@@ -311,7 +316,7 @@ body { font-family: arial, sans-serif; color: #202124; }
 </div>
 <script type="module" async src="/suggest.js"></script>
 <div class="tabs">${tabs}</div>
-<div class="serp${aside ? " has-aside" : ""}">${aside ? KP_LOADING : ""}
+<div class="serp${aside ? " has-aside" : ""}">${aside ? KP_LOADING : ""}${lead}
 <div id="shimmer"><div class="note">Searching the future web…</div><div class="bar" style="width:62%"></div><div class="bar" style="width:88%"></div><div class="bar" style="width:74%"></div><div class="bar" style="width:81%"></div><div class="bar" style="width:55%"></div></div>
 `;
 }
@@ -524,7 +529,7 @@ function pager(href, query, page) {
 }
 
 // ---------- generic streamed results route ----------
-function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, renderItem, validate, dedupeKey, header = () => "", footer = () => "", paged = false, aside, prefetch, realSites = false }) {
+function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, renderItem, validate, dedupeKey, header = () => "", footer = () => "", paged = false, aside, lead, prefetch, realSites = false }) {
   const shards = shardPrompt ? Math.min(SHARDS, angles.length) : 1;
 
   // With realSites, a query naming a known site gets it as a code-built top
@@ -570,13 +575,21 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
           (err) => console.warn(`[${tab.toLowerCase()}] side panel: ${err.message}`),
         ).finally(() => { sideDone = true; })
       : null;
-    emit(shell(query, tab, page, { aside: side }));
+    // Instant answers (page 1 only) fill slots above the results; nothing waits for them.
+    const top = lead && page === 1;
+    emit(shell(query, tab, page, { aside: side, lead: top ? lead.slots : "" }));
     res.flushHeaders?.();
+    let count = 0;
+    let leadDone = !top;
+    const leadTask = top
+      ? lead.start(query, { req, emit: (chunk) => { if (!res.writableEnded) emit(chunk); }, shown: () => count > 0 })
+        .catch((err) => console.warn(`[${tab.toLowerCase()}] answers: ${err.message}`))
+        .finally(() => { leadDone = true; })
+      : null;
 
     try {
       const t0 = Date.now();
       console.log(`[${tab.toLowerCase()}] "${query}"${page > 1 ? ` page ${page}` : ""}${shards > 1 ? ` (${shards} shards)` : ""}`);
-      let count = 0;
       let invented = 0;
       // Shards work from different slices of the web, but they can still land on
       // the same obvious domain — drop the later one so the page never shows a
@@ -625,9 +638,10 @@ function resultsRoute({ tab, prompt, shardPrompt, angles, total, container, rend
       }
       console.log(`[${tab.toLowerCase()}] ${count} results in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
       if (count === 0) throw new Error("no results returned");
-      // Give a slow panel a little longer, then hide its placeholder.
-      if (sideTask) await Promise.race([sideTask, new Promise((r) => setTimeout(r, 6000))]);
+      // Give a slow panel or answer a little longer, then hide their placeholders.
+      if (sideTask || leadTask) await Promise.race([Promise.all([sideTask, leadTask]), new Promise((r) => setTimeout(r, 6000))]);
       if (!sideDone) emit(`<style>#kp{display:none}</style>`);
+      if (!leadDone) emit(lead.abandon);
       emit(`</div>\n${footer(query, page, sideData)}${SHELL_TAIL}`);
       res.end();
       cachePut(serpCache, cacheKey, html);
@@ -756,6 +770,7 @@ app.get(
     footer: (query, page, overview) => `${relatedSearches(overview)}${pager("/search", query, page)}`,
     paged: true,
     aside: { load: fetchOverview, render: renderOverview },
+    lead: answers,
     prefetch: (query, r) => {
       try {
         const u = new URL(r.url);
