@@ -97,6 +97,22 @@ Same six prompts (a hero, four subjects, the Maps-tab map) through GPT-6 Luna, o
 
 Hosted presets now draw lean SVGs (`--images ascii` restores the old art). On generated sites the site's `bg`/`fg` go into the prompt, so pictures are drawn in the page's palette and use its background as their backdrop; tested on neon, paper and light palettes. Single-letter `<text>` is allowed so map pins keep their A–F labels.
 
+## Images: one house style → many media
+
+Every picture used to get the same brief ("bold flat-vector, 4-6 colours, at most one gradient, 400x300, no text"), with no colour guidance off-site, so an Images grid came back as twelve 4:3 flat illustrations in the same warm beiges, and every picture on a site was tints of its accent. Now each picture has a **style** (22 media, each with its own SVG technique: gradients and blur for photos, `feTurbulence` grain and paper, `feDisplacementMap` rough edges for woodcuts, collage and watercolour, halftone `<pattern>`s, neon glow, crisp-edged pixel grids, UI chrome, chart axes) and a **shape** (1:1, 4:3, 16:9, 3:4, 2:3). Image search results name both; the grid lays them out in justified rows. A site picks one style from its kind and mood. News thumbnails are mostly photos, with the odd chart, map or scan. Media made of words (memes, charts, screenshots, blueprints, maps, diagrams) may use a few short labels. Photographic media get a light (golden hour, flash, night streetlights…) and flat-colour media a colour scheme, both picked per description, so a page doesn't converge on one palette. Before/after screenshots: `.foogle-bench/shots/`.
+
+All 22 styles of one subject, GPT-6 Luna, 8 concurrent:
+
+| Brief size target | Median | Mean SVG size | Notes |
+|---|---:|---:|---|
+| old flat brief (≈ `flat` style) | 5.0-6.4s | ~1300 chars | one look |
+| 1600 chars | 7.8s | 2163 chars | |
+| 1300 chars (shipped) | 7.0s | 1911 chars | text-heavy screenshots and charts are slowest (~8-11s) |
+
+A whole Images page (12 pictures) finishes in about the same time as before; six Images pages at once (72 pictures through the 12 image slots) took 42-48s against 39-43s. Page generation doesn't change: on three fresh sites the styled header arrived after 0.22-0.29s and the page finished in 4.4-6.0s.
+
+Things that broke and are now guarded: a model repeats an attribute (`fill="#333" … fill="none"`), or writes a bare `&` in a label, and the whole SVG renders blank (the sanitizer now dedupes attributes and escapes `&`); a frame drawn as a `<path>` without `fill="none"` blacks out the picture (the brief now says so); displacement filters leave ragged bare edges unless the background stays unfiltered.
+
 ## Live references
 
 - [OpenRouter model catalog](https://openrouter.ai/api/v1/models) — exact IDs and prices were checked before trials.
