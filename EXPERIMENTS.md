@@ -129,6 +129,46 @@ Now a section is finished at its own closing tag: the page moves on, and the res
 
 In the "after" run, 10 sections ran on and 5 of them reached the limit, which would have failed 5 pages before. Page times are for pages that completed. The runs turned up one unrelated failure: twice in a row, the provider's stream died mid-section ("Stream ended before a terminal response event").
 
+## Search suggestions: which model, and how fast — 2026-09-23
+
+Suggestions under the search boxes (`lib/suggest.js`, `public/suggest.js`) had to feel instant: the target was suggestions for what's typed on screen within ~150ms of a pause, at p50. Measured from a laptop on home broadband; each "list" is one streamed call asking for 10 suggestions (16 for 1-2 characters), at a cost of ~350 tokens in and ~100 out.
+
+**Models.** Ten prefixes ("cn", "how to m", "best ", "weather in", "am", "is it safe to", "mars colony j", "yout", "fl", "reddit "), same prompt, one call each, four models at a time. The times are from sending the request:
+
+| Model (provider) | First token p50 / p90 | First line p50 | 8 lines p50 | All p50 | $ per list | Lines that continue the text |
+|---|---:|---:|---:|---:|---:|---:|
+| Llama 3.1 8B (Groq) | 143 / 169ms | 164ms | 214ms | 243ms | $0.000016 | 82% (27% on long text) |
+| Llama 3.3 70B (Groq) | 180 / 207ms | 202ms | 419ms | 476ms | $0.000176 | 100% (80% on long text) |
+| gpt-oss-120b, low reasoning (Cerebras) | 217 / 1616ms | 298ms | 309ms | 314ms | $0.000219 | 99%; one 429 in ten |
+| gpt-oss-20b, low reasoning (Groq) | 324 / 523ms | 326ms | 426ms | 454ms | $0.000057 | 100%, but offers the typed text itself as a site ("cn \| cnn.com") |
+| Ministral 3B | 353 / 1267ms | 374ms | 699ms | 904ms | $0.000020 | 96% |
+| Gemini 3.1 Flash Lite | 561 / 841ms | 561ms | 787ms | 868ms | $0.000143 | 100% |
+| GPT-6 Luna, fast tier | 538 / 677ms | 568ms | 817ms | 971ms | $0.000099 | 100% |
+| GPT-6 Luna | 591 / 791ms | 641ms | 1022ms | 1224ms | $0.000050 | 100%, the best lists |
+| Mercury 2.5 | 620 / 5757ms | 620ms | 620ms | 632ms | $0.000017 | 100%, but copied the prompt's example |
+| Llama 3.1 8B (any provider) | 449 / 5757ms | 513ms | 1247ms | 1342ms | $0.000008 | 87% |
+| Gemma 4 26B, Qwen 3.7 Flash, Ling 3.0 Flash, DeepSeek V4 Flash | 594–962ms | 773–1280ms | | 992–3169ms | $0.000005–0.000033 | 94–100% |
+
+Only Groq's Llamas get under ~200ms. Jev (TypeSafe) answers in 180-270ms, but it returns typed judgments over options it's given (a choice among candidate completions, say); it can't write suggestions, so it would only add a second hop. Luna writes the best lists but its first token takes ~600ms. The 8B is fastest and cheapest, and fine on short text, but on long text it rewords what was typed ("weather in tokyo tomor" → "tokyo weather today"), leaving one or two usable lines; a second example in the prompt took it from 48% to 60% overall. So short text (under 12 characters) goes to the 8B and longer text to the 70B.
+
+**End to end.** `scripts/suggest-latency.js` types 10 queries per round into the browser's own suggestion engine against a real server: 90-220ms a key (~75 wpm), a pause to read after a third of the words and at the end. "After a pause" is the time from the last key before the pause until suggestions for that text were there to show (a frame of rendering not included); "full list" until the dropdown had 5 rows or everything there was. Cold is the first visitor on a fresh server (which then writes the empty box and the 26 first letters for everyone, $0.0007 once), warm is different queries after that, and repeat the first queries again as a new visitor.
+
+| Setup | Round | After a pause p50 / p90 | Full list p50 / p90 | Answered in the browser | Model calls per query | $ per query |
+|---|---|---:|---:|---:|---:|---:|
+| **Shipped: 8B under 12 characters, 70B from 12** | cold | **0 / 158ms** | 0 / 236ms | 75% of keys | 10.4 | $0.0014 |
+| | warm | **0 / 102ms** | 0 / 233ms | 76% | 9.2 | $0.0009 |
+| | repeat | 0 / 1ms | 0 / 1ms | 80% | 1.2 | $0.0002 |
+| 8B only | cold | 0 / 63ms | 0 / 284ms | 80% | 11.1 | $0.0002 |
+| | warm | 0 / 0ms | 0 / 183ms | 76% | 8.2 | $0.00013 |
+| 70B only | cold | 0 / 149ms | 26 / 277ms | 74% | 12.8 | $0.0025 |
+| | warm | 0 / 0ms | 0 / 392ms | 80% | 11.0 | $0.0021 |
+| Shipped models, waiting up to 150ms for a shorter prefix's list in flight | cold | 0 / 190ms | 3 / 415ms | 66% | 7.9 | $0.0010 |
+| 8B only, the same waiting | warm | 0 / 283ms | 0 / 336ms | 67% | 6.8 | $0.00014 |
+
+What makes it fast is not the model so much as the browser: every list it fetches is kept, and the lists of shorter prefixes are filtered for the current text, so three keys in four have suggestions at once (a list for "cnn" answers "cnn " and "cnn l" while "cnn l"'s own list streams in). A request goes out only when those can't fill 5 rows, streams line by line, and is cancelled only if the text is edited so it no longer fits. On the server, lists go into an LRU shared by all visitors, and a request joins a generation already running for the same text. After a pause on a prefix the browser also prefetches the top suggestion's next letter (about one request in ten). Waiting on a list already in flight instead of asking for every key saved a quarter of the calls but made suggestions visibly slower, so it's off (`patience` in `createEngine`). The 70B makes long queries' lists full instead of one or two lines, at ~6 times the cost per query; `SUGGEST_LONG_AT=1000` runs the 8B everywhere.
+
+**Cost and limits.** A typed query costs ~$0.001 of model calls, about a seventh of a search ($0.007), and nothing when someone has typed it before. Each generated list is charged to the visitor as `suggest` ($0.00003) or `suggestLong` ($0.00025) in `lib/limits.js`, so the default $0.10 burst covers ~70 typed queries on top of searching; lists from the cache are free. Over a limit, or over the day's budget, `/api/suggest` answers with no suggestions (429/503 and `Retry-After`) and the browser asks for nothing until then: the box just has no dropdown. A model that fails or takes over 2.5s gives no suggestions either.
+
 ## Live references
 
 - [OpenRouter model catalog](https://openrouter.ai/api/v1/models) — exact IDs and prices were checked before trials.

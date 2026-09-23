@@ -12,6 +12,7 @@
   --fb-press: rgba(60, 64, 67, .16);
   --fb-accent: #1a73e8;
   --fb-row: #e8f0fe;
+  --fb-visited: #681da8;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -27,6 +28,7 @@
     --fb-press: rgba(232, 234, 237, .16);
     --fb-accent: #8ab4f8;
     --fb-row: #3c4043;
+    --fb-visited: #c58af9;
     color-scheme: dark;
   }
 }
@@ -108,6 +110,13 @@ input:focus + .url { visibility: hidden; }
 .row .detail::before { content: "– "; }
 .row:hover { background: var(--fb-hover); }
 .row[aria-selected="true"] { background: var(--fb-row); }
+/* AI suggestions and recent searches look as in Foogle's search boxes (public/suggest.js). */
+.row .label b { font-weight: 700; }
+.row[data-kind="recent"] .label { color: var(--fb-visited); }
+.row .ico { flex: none; width: 18px; height: 18px; border-radius: 4px; }
+.row .rm { flex: none; margin: 0 0 0 auto; padding: 4px 0 4px 12px; border: 0; background: none; font: inherit; font-size: 13px; color: var(--fb-muted); cursor: pointer; }
+.row .rm:hover { text-decoration: underline; color: var(--fb-text); }
+.drop .head { padding: 10px 16px 4px 12px; font-size: 13px; color: var(--fb-muted); }
 
 /* ---------- site information ---------- */
 .pop { position: fixed; inset: auto; top: 71px; left: 88px; width: 330px; max-width: calc(100vw - 16px); margin: 0; padding: 16px 18px 6px; border: 0; border-radius: 8px; background: var(--fb-bar); color: var(--fb-text); font: inherit; box-shadow: 0 1px 3px rgba(0, 0, 0, .2), 0 8px 28px rgba(0, 0, 0, .22); }

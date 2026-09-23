@@ -73,6 +73,12 @@ const PAGES = [
   // The address bar: "cnn" offers the search and cnn.com; "cnn.com" goes there.
   { name: "omnibox", path: STORE, browser: true, full: false, steps: [{ click: ".omni input" }, { fill: [".omni input", "cnn"] }, { wait: ".drop .row >> nth=1" }] },
   { name: "omnibox-go", path: "/", browser: true, full: false, steps: [{ click: ".omni input" }, { fill: [".omni input", "cnn.com"] }, { press: "Enter" }, { url: "/web/cnn\\.com$" }, { wait: 1500 }] },
+  // Search suggestions (public/suggest.js): the homepage dropdown with the
+  // second row picked by arrow key, recent searches above AI ones on the
+  // results page, and AI rows in the address bar.
+  { name: "suggest-home", path: "/", full: false, steps: [{ click: "input[name=q]" }, { fill: ["input[name=q]", "cn"] }, { wait: ".fsg-row >> nth=5" }, { press: "ArrowDown" }, { press: "ArrowDown" }] },
+  { name: "suggest-recent", path: "/", full: false, steps: [{ click: "input[name=q]" }, { fill: ["input[name=q]", "storm lanterns"] }, { press: "Enter" }, { url: "search\\?q=storm" }, { click: ".searchbox input" }, { fill: [".searchbox input", "st"] }, { wait: ".fsg-row >> nth=4" }] },
+  { name: "suggest-omnibox", path: "/", browser: true, full: false, steps: [{ click: ".omni input" }, { fill: [".omni input", "yo"] }, { wait: ".drop [data-kind=suggest] >> nth=2" }] },
   {
     name: "checkout", path: STORE, steps: [...addToCart,
       { fill: [".fw-checkout [name=name]", "Ada Moss"] }, { fill: [".fw-checkout [name=email]", "ada@example.com"] }, { fill: [".fw-checkout [name=address]", "1 Pier Rd, Port Avery"] },
